@@ -48,11 +48,11 @@ func Transcripts(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	db, err := database.Connect(config.Postgres)
-	defer db.Close()
 	if err != nil {
 		slog.Error("Unable to connect to DB", slog.Any("error", err))
 		os.Exit(1)
 	}
+	defer db.Close()
 	// actual logic
 
 	client := &http.Client{}
@@ -89,6 +89,7 @@ func Transcripts(cmd *cobra.Command, args []string) {
 				for _, col := range row.Columns {
 					columns = append(columns, col.Name)
 					val := col.Value
+					// cannot do this SQL, the grade_id column is constrained to *not* be nil (part of the compound primary key for the db)
 					if col.Name == "grade_id" && val == nil {
 						val = 999999
 					}

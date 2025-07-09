@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -30,12 +31,15 @@ type BBAPIConnector struct {
 	config     *Config
 	configPath string
 	Client     *http.Client
+	EndYear    int
+	StartYear  int
 }
 
 const (
 	TOKEN_URL string = "https://oauth2.sky.blackbaud.com/token"
 	LISTS_API string = "https://api.sky.blackbaud.com/school/v1/lists/advanced"
 	HOST      string = "api.sky.blackbaud.com"
+	YEAR_API  string = "https://api.sky.blackbaud.com/school/v1/years"
 )
 
 // Create a new API connector using an existing JSON path (MUST exist, currently we don't generate the auth stuff just yet)
@@ -51,6 +55,8 @@ func NewBBApiConnector(configPath string) (*BBAPIConnector, error) {
 		&config,
 		configPath,
 		client,
+		0,
+		0,
 	}
 	req, err := connector.NewRequest(http.MethodGet, config.Other.TestApiEndpoint, nil /* body */)
 	if err != nil {
@@ -74,6 +80,13 @@ func NewBBApiConnector(configPath string) (*BBAPIConnector, error) {
 
 		return NewBBApiConnector(configPath)
 	case http.StatusOK:
+		end, start, err := getYears(connector)
+		if err != nil {
+			return nil, err
+		}
+		// set them properly if the year is correct
+		connector.StartYear = start
+		connector.EndYear = end
 		return connector, nil
 	}
 
@@ -171,4 +184,53 @@ func saveConfig(configPath string, config Config) error {
 	}
 
 	return nil
+}
+
+/* get the academic year from blackbaud */
+func getYears(connector *BBAPIConnector) (int, int, error) {
+	req, err := connector.NewRequest(http.MethodGet, YEAR_API, nil /* body */)
+	if err != nil {
+		return 0, 0, err
+	}
+	parsed := struct {
+		Value []struct {
+			CurrentYear     bool   `json:"current_year"`
+			SchoolYearLabel string `json:"school_year_label"`
+			BeginDate       string
+			EndDate         string
+		} `json:"value"`
+	}{}
+	resp, err := connector.Client.Do(req)
+	if err != nil {
+		return 0, 0, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	err = json.Unmarshal(body, &parsed)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	yearID := -1
+	for i, year := range parsed.Value {
+		if year.CurrentYear {
+			yearID = i
+			break
+		}
+	}
+	// if empty, cry about it
+	if yearID == -1 {
+		return 0, 0, fmt.Errorf("Unabled to find current year")
+	}
+
+	beginTime, err := time.Parse(time.RFC3339, parsed.Value[yearID].BeginDate)
+	if err != nil {
+		return 0, 0, fmt.Errorf("Unabled to find current year")
+	}
+
+	endTime, err := time.Parse(time.RFC3339, parsed.Value[yearID].EndDate)
+	if err != nil {
+		return 0, 0, fmt.Errorf("Unabled to find current year")
+	}
+
+	return beginTime.Year(), endTime.Year(), resp.Body.Close()
 }
