@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/BushSchoolIT/extractor/database"
 	"github.com/spf13/cobra"
 )
 
@@ -39,14 +40,9 @@ func init() {
 }
 
 type Config struct {
-	Parents           string   `json:"parents"`
-	TranscriptListIDs []string `json:"transcript_list_ids"`
-	Postgres          struct {
-		User     string `json:"user"`
-		Password string `json:"password"`
-		Host     string `json:"host"`
-		Port     string `json:"port"`
-	} `json:"postgres"`
+	Parents           string          `json:"parents"`
+	TranscriptListIDs []string        `json:"transcript_list_ids"`
+	Postgres          database.Config `json:"postgres"`
 }
 
 func loadConfig(configPath string) (Config, error) {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"strings"
@@ -57,10 +56,6 @@ func NewBBApiConnector(configPath string) (*BBAPIConnector, error) {
 	if err != nil {
 		return nil, err
 	}
-	dump, err := httputil.DumpRequestOut(req, true)
-	if err == nil {
-		fmt.Printf("FULL HTTP REQUEST:\n%s\n", dump)
-	}
 	resp, err := connector.Client.Do(req)
 	if err != nil {
 		return nil, err
@@ -77,8 +72,6 @@ func NewBBApiConnector(configPath string) (*BBAPIConnector, error) {
 			return nil, err
 		}
 
-		fmt.Printf("%v", resp)
-		os.Exit(1)
 		return NewBBApiConnector(configPath)
 	case http.StatusOK:
 		return connector, nil
@@ -104,13 +97,17 @@ func refreshToken(config *Config) error {
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
-
 	if err != nil {
 		return err
 	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("could not refresh auth token, response code returned: %d, body: %s", resp.StatusCode, string(body))
 	}
 
 	tokenResp := struct {
@@ -119,16 +116,17 @@ func refreshToken(config *Config) error {
 	}{}
 
 	err = json.Unmarshal(body, &tokenResp)
-	config.Tokens.AccessToken = tokenResp.AccessToken
-	config.Tokens.RefreshToken = tokenResp.RefreshToken
 	if err != nil {
 		return err
 	}
+
+	config.Tokens.AccessToken = tokenResp.AccessToken
+	config.Tokens.RefreshToken = tokenResp.RefreshToken
 	return resp.Body.Close()
 }
 
 func (b *BBAPIConnector) NewRequest(method string, url string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, b.config.Other.TestApiEndpoint, body)
+	req, err := http.NewRequest(method, url, body)
 
 	if err != nil {
 		return req, err
