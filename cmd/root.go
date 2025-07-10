@@ -49,6 +49,10 @@ type Config struct {
 	ParentsID         string          `json:"parents_list_id"`
 	TranscriptListIDs []string        `json:"transcript_list_ids"`
 	Postgres          database.Config `json:"postgres"`
+	EnrollmentListIDs struct {
+		Departed string `json:"departed"`
+		Current  string `json:"current"`
+	} `json:"enrollment_list_ids"`
 }
 
 func loadConfig(configPath string) (Config, error) {

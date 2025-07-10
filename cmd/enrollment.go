@@ -2,20 +2,17 @@ package cmd
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
-	"strconv"
-	"strings"
 
 	"github.com/BushSchoolIT/extractor/blackbaud"
 	"github.com/BushSchoolIT/extractor/database"
 	"github.com/spf13/cobra"
 )
 
-func Parents(cmd *cobra.Command, args []string) {
+func Enrollment(cmd *cobra.Command, args []string) {
 	// load config and blackbaud API
 	api, err := blackbaud.NewBBApiConnector(fAuthFile)
 	if err != nil {
@@ -33,9 +30,17 @@ func Parents(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 	defer db.Close()
+	// actual logic
+	db.TranscriptCleanup(api.EndYear)
 
+	slog.Info("Processing current List", slog.String("id", config.EnrollmentListIDs.Current))
+	processEnrollmentList(config.EnrollmentListIDs.Current, api, db.InsertEnrollmentInfo)
+	slog.Info("Import Complete")
+}
+
+func processEnrollmentList(id string, api *blackbaud.BBAPIConnector, insert func([]string, []any) error) {
 	for page := 1; ; page++ {
-		req, err := api.NewRequest(http.MethodGet, blackbaud.AdvancedListApi(config.ParentsID, page), nil)
+		req, err := api.NewRequest(http.MethodGet, blackbaud.AdvancedListApi(id, page), nil)
 		if err != nil {
 			slog.Error("Unable to create request", slog.Any("error", err))
 			continue
@@ -46,7 +51,6 @@ func Parents(cmd *cobra.Command, args []string) {
 			continue
 		}
 		body, err := io.ReadAll(resp.Body)
-
 		if resp.StatusCode != http.StatusOK {
 			slog.Error("Blackbaud API returned unexpected status code", slog.Any("code", resp.StatusCode), slog.String("body", string(body)))
 			continue
@@ -65,35 +69,16 @@ func Parents(cmd *cobra.Command, args []string) {
 		slog.Info("Inserting data from page", slog.Int("page", page))
 
 		for _, row := range parsed.Results.Rows {
-			parent := map[string]string{}
-			grades := []int{}
-
+			columns := []string{}
+			values := []any{}
 			for _, col := range row.Columns {
-				if col.Value == nil {
-					continue
-				}
-				val := fmt.Sprintf("%v", col.Value)
-				switch {
-				case col.Name == "email":
-					parent["email"] = val
-				case col.Name == "first_name":
-					parent["first_name"] = val
-				case col.Name == "last_name":
-					parent["last_name"] = val
-				// different casing because blackbaud is weird
-				case strings.HasPrefix(col.Name, "Grad"):
-					if gradYear, err := strconv.Atoi(val); err == nil {
-						if grade := gradYearToGrade(gradYear, api.EndYear); grade >= 0 && grade <= 12 {
-							grades = append(grades, grade)
-						}
-					}
-				}
+				columns = append(columns, col.Name)
+				values = append(values, col.Value)
 			}
-
-			if email := strings.TrimSpace(parent["email"]); email != "" && len(grades) > 0 {
-				if err := db.InsertEmail(email, parent["first_name"], parent["last_name"], grades); err != nil {
-					slog.Error("Unable to add email", slog.Any("error", err))
-				}
+			err := insert(columns, values)
+			if err != nil {
+				slog.Error("Unable to insert transcript info", slog.Any("error", err))
+				continue
 			}
 		}
 		err = resp.Body.Close()
@@ -102,8 +87,4 @@ func Parents(cmd *cobra.Command, args []string) {
 			continue
 		}
 	}
-}
-
-func gradYearToGrade(graduationYear int, currentYear int) int {
-	return 12 - (graduationYear - currentYear)
 }

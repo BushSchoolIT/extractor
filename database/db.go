@@ -48,9 +48,10 @@ func (db *State) Close() error {
 }
 
 // TODO make the other DB transformations/cleanups
-func (db *State) InsertTranscriptInfo(columns []string, values []any) error {
+
+func colInsertHelper(columns []string, values []any, query string) (string, error) {
 	if len(columns) != len(values) {
-		return fmt.Errorf("columns and values length mismatch")
+		return "", fmt.Errorf("columns and values length mismatch")
 	}
 	columnsStr := strings.Join(columns, ",")
 
@@ -61,12 +62,33 @@ func (db *State) InsertTranscriptInfo(columns []string, values []any) error {
 	}
 	placeholdersStr := strings.Join(placeholders, ",")
 
-	query := fmt.Sprintf(`
+	return fmt.Sprintf(query, columnsStr, placeholdersStr), nil
+}
+
+func (db *State) InsertTranscriptInfo(columns []string, values []any) error {
+	query, err := colInsertHelper(columns, values, `
 INSERT INTO transcripts (%s) VALUES (%s)
 ON CONFLICT (student_user_id,term_id,group_id,course_id,grade_id) 
 DO UPDATE SET 
-(student_first,student_last,grad_year,course_title,course_code,group_description,term_name,grade_description,grade_mode,grade,score,transcript_category,school_year,address_1,address_2,address_3,address_city,address_state,address_zip) = (EXCLUDED.student_first,EXCLUDED.student_last,EXCLUDED.grad_year,EXCLUDED.course_title,EXCLUDED.course_code,EXCLUDED.group_description,EXCLUDED.term_name,EXCLUDED.grade_description,EXCLUDED.grade_mode,EXCLUDED.grade,EXCLUDED.score,EXCLUDED.transcript_category,EXCLUDED.school_year,EXCLUDED.address_1,EXCLUDED.address_2,EXCLUDED.address_3,EXCLUDED.address_city,EXCLUDED.address_state,EXCLUDED.address_zip);`, columnsStr, placeholdersStr)
-	_, err := db.Conn.Exec(*db.Ctx, query, values...)
+(student_first,student_last,grad_year,course_title,course_code,group_description,term_name,grade_description,grade_mode,grade,score,transcript_category,school_year,address_1,address_2,address_3,address_city,address_state,address_zip) = (EXCLUDED.student_first,EXCLUDED.student_last,EXCLUDED.grad_year,EXCLUDED.course_title,EXCLUDED.course_code,EXCLUDED.group_description,EXCLUDED.term_name,EXCLUDED.grade_description,EXCLUDED.grade_mode,EXCLUDED.grade,EXCLUDED.score,EXCLUDED.transcript_category,EXCLUDED.school_year,EXCLUDED.address_1,EXCLUDED.address_2,EXCLUDED.address_3,EXCLUDED.address_city,EXCLUDED.address_state,EXCLUDED.address_zip);`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Conn.Exec(*db.Ctx, query, values...)
+	return err
+}
+
+func (db *State) InsertEnrollmentInfo(columns []string, values []any) error {
+	query, err := colInsertHelper(columns, values, `
+INSERT INTO enrollment (%s) VALUES %s
+ON CONFLICT (student_user_id) 
+DO UPDATE SET 
+(student_first,student_last,grad_year,enroll_date, graduated, enroll_grade, enroll_year) = (EXCLUDED.student_first,EXCLUDED.student_last,EXCLUDED.grad_year,EXCLUDED.enroll_date, EXCLUDED.graduated, EXCLUDED.enroll_grade, EXCLUDED.enroll_year);
+	`)
+	if err != nil {
+		return err
+	}
+	_, err = db.Conn.Exec(*db.Ctx, query, values...)
 	return err
 }
 
