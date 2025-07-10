@@ -135,8 +135,8 @@ Reassigns grade_id for Fall YL grades when the year is the current year. We need
 allow them to show up in powerBI. Typically Fll YL grades are filtered out because they are overwritten
 by YL grades.
 */
-func (db *State) FixFallYearlongs(year int) error {
-	yearStr := fmt.Sprintf("%d", year)
+func (db *State) FixFallYearlongs(startYear int, endYear int) error {
+	yearStr := fmt.Sprintf("%d - %d", startYear, endYear)
 	_, err := db.Conn.Exec(*db.Ctx, `
 		UPDATE public.transcripts
         SET grade_description = 'current_fall_yl',

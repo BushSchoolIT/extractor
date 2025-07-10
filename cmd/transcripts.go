@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -54,12 +53,13 @@ func Transcripts(cmd *cobra.Command, args []string) {
 	}
 	defer db.Close()
 	// actual logic
+	db.TranscriptCleanup(api.EndYear)
 
 	client := &http.Client{}
 	for _, id := range config.TranscriptListIDs {
 		slog.Info("Processing List", slog.String("id", id))
 		for page := 1; ; page++ {
-			req, err := api.NewRequest(http.MethodGet, fmt.Sprintf("%s/%s?page=%d", blackbaud.LISTS_API, id, page), nil)
+			req, err := api.NewRequest(http.MethodGet, blackbaud.AdvancedListApi(id, page), nil)
 			if err != nil {
 				slog.Error("Unable to create request", slog.Any("error", err))
 				continue
@@ -104,47 +104,9 @@ func Transcripts(cmd *cobra.Command, args []string) {
 			}
 		}
 	}
-}
-
-func processPage(c chan error, id string, page int, api blackbaud.BBAPIConnector) {
-	req, err := api.NewRequest(http.MethodGet, fmt.Sprintf("%s/%s?page=%d", blackbaud.LISTS_API, id, page), nil)
-	if err != nil {
-		slog.Error("Unable to create request", slog.Any("error", err))
-		c <- err
-		return
-	}
-	resp, err := api.Client.Do(req)
-	if err != nil {
-		slog.Error("Unable to access blackbaud api", slog.Any("error", err))
-		c <- err
-		return
-	}
-	body, err := io.ReadAll(resp.Body)
-
-	var parsed apiResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		slog.Error("JSON unmarshal failed:", slog.Any("error", err))
-		c <- err
-		return
-	}
-
-	slog.Info("Inserting data from page", slog.Int("page", page))
-
-	for _, row := range parsed.Results.Rows {
-		columns := []string{}
-		values := []any{}
-		for _, col := range row.Columns {
-			columns = append(columns, col.Name)
-			val := col.Value
-			if col.Name == "grade_id" && val == nil {
-				val = 999999
-			}
-			values = append(values, val)
-		}
-	}
-	err = resp.Body.Close()
-	if err != nil {
-		c <- err
-		return
-	}
+	// transformation functions
+	db.FixNoYearlong()
+	db.FixNonstandardGrades()
+	db.FixFallYearlongs(api.StartYear, api.EndYear)
+	db.InsertMissingTranscriptCategories()
 }

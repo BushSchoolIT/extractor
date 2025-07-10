@@ -2,10 +2,10 @@
 "transcript_list_ids":["153908","154813","154814","154815","154816","154817","154818","154819","154820","154821","154822","154823","154824","154825","154826","154827","154828","154829","154830","154831","154832","154833","154834","154835","154836","154837"],
   "parents": "166297",
   "postgres": {
-    "database":"<placeholder>",
-    "user":"<placeholder>",
-    "password":"<placeholder>",
-    "address":"<placeholder>",
-    "port":"<placeholder>"
+    "database":"school_db",
+    "user":"postgres",
+    "password":"postgres",
+    "address":"0.0.0.0",
+    "port":"5432"
   }
 }

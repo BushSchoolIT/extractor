@@ -196,8 +196,8 @@ func getYears(connector *BBAPIConnector) (int, int, error) {
 		Value []struct {
 			CurrentYear     bool   `json:"current_year"`
 			SchoolYearLabel string `json:"school_year_label"`
-			BeginDate       string
-			EndDate         string
+			BeginDate       string `json:"begin_date"`
+			EndDate         string `json:"end_date"`
 		} `json:"value"`
 	}{}
 	resp, err := connector.Client.Do(req)
@@ -224,13 +224,17 @@ func getYears(connector *BBAPIConnector) (int, int, error) {
 
 	beginTime, err := time.Parse(time.RFC3339, parsed.Value[yearID].BeginDate)
 	if err != nil {
-		return 0, 0, fmt.Errorf("Unabled to find current year")
+		return 0, 0, fmt.Errorf("Unable to parse start year time: %v", err)
 	}
 
 	endTime, err := time.Parse(time.RFC3339, parsed.Value[yearID].EndDate)
 	if err != nil {
-		return 0, 0, fmt.Errorf("Unabled to find current year")
+		return 0, 0, fmt.Errorf("Unabled to end year time: %v", err)
 	}
 
 	return beginTime.Year(), endTime.Year(), resp.Body.Close()
+}
+
+func AdvancedListApi(id string, page int) string {
+	return fmt.Sprintf("%s/%s?page=%d", LISTS_API, id, page)
 }
