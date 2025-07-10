@@ -20,6 +20,11 @@ var (
 		Short: "Extracts transcript info from blackbaud and imports it into the database",
 		Run:   Transcripts,
 	}
+	parentsCmd = &cobra.Command{
+		Use:   "parents",
+		Short: "Extracts parent info from blackbaud and imports it into the database for mailing info",
+		Run:   Parents,
+	}
 	fLogFile    string
 	fLogLevel   string
 	fConfigFile string
@@ -35,12 +40,13 @@ func Execute() {
 
 func init() {
 	rootCmd.AddCommand(transcriptCmd)
+	rootCmd.AddCommand(parentsCmd)
 	rootCmd.PersistentFlags().StringVar(&fConfigFile, "config", "config.json", "config file containing list IDs")
 	rootCmd.PersistentFlags().StringVar(&fAuthFile, "auth", "bb_auth.json", "authconfig for blackbaud")
 }
 
 type Config struct {
-	Parents           string          `json:"parents"`
+	ParentsID         string          `json:"parents_list_id"`
 	TranscriptListIDs []string        `json:"transcript_list_ids"`
 	Postgres          database.Config `json:"postgres"`
 }

@@ -18,7 +18,7 @@ type Config struct {
 	Port     string `json:"port"`
 	Password string `json:"password"`
 	Addr     string `json:"address"`
-	Name     string `json:"name"`
+	Name     string `json:"database"`
 }
 
 func Connect(c Config) (State, error) {
@@ -222,5 +222,19 @@ func (db *State) InsertMissingTranscriptCategories() error {
         AND public.transcripts.transcript_category = 'NaN'
         AND ranked_prefixes.rn = 1;
 	`)
+	return err
+}
+
+func (db *State) InsertEmail(email string, firstName string, lastName string, grades []int) error {
+	_, err := db.Conn.Exec(*db.Ctx,
+		`
+INSERT INTO parents (email, first_name, last_name, grade)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (email) DO UPDATE SET
+  first_name = EXCLUDED.first_name,
+  last_name = EXCLUDED.last_name,
+  grade = EXCLUDED.grade;
+`,
+		email, firstName, lastName, grades)
 	return err
 }

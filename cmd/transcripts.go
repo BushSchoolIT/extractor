@@ -12,28 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type Column struct {
-	Name  string `json:"name"`
-	Value any    `json:"value"`
-}
-
-type Row struct {
-	Columns []Column `json:"columns"`
-}
-
-type apiResponse struct {
-	Results struct {
-		Rows []Row `json:"rows"`
-	} `json:"results"`
-	NextLink string `json:"next_link"`
-	Paging   struct {
-		RemainingRows int `json:"remaining_rows"`
-		Page          int `json:"page"`
-		PageSize      int `json:"page_size"`
-		TotalRows     int `json:"total_rows"`
-	} `json:"paging"`
-}
-
 func Transcripts(cmd *cobra.Command, args []string) {
 	// load config and blackbaud API
 	api, err := blackbaud.NewBBApiConnector(fAuthFile)
@@ -55,56 +33,13 @@ func Transcripts(cmd *cobra.Command, args []string) {
 	// actual logic
 	db.TranscriptCleanup(api.EndYear)
 
-	client := &http.Client{}
 	for _, id := range config.TranscriptListIDs {
 		slog.Info("Processing List", slog.String("id", id))
-		for page := 1; ; page++ {
-			req, err := api.NewRequest(http.MethodGet, blackbaud.AdvancedListApi(id, page), nil)
-			if err != nil {
-				slog.Error("Unable to create request", slog.Any("error", err))
-				continue
-			}
-			resp, err := client.Do(req)
-			if err != nil {
-				slog.Error("Unable to access blackbaud api", slog.Any("error", err))
-				continue
-			}
-			body, err := io.ReadAll(resp.Body)
-
-			var parsed apiResponse
-			if err := json.Unmarshal(body, &parsed); err != nil {
-				slog.Error("JSON unmarshal failed:", slog.Any("error", err))
-				continue
-			}
-
-			if len(parsed.Results.Rows) == 0 {
-				break // No more data
-			}
-
-			slog.Info("Inserting data from page", slog.Int("page", page))
-
-			for _, row := range parsed.Results.Rows {
-				columns := []string{}
-				values := []any{}
-				for _, col := range row.Columns {
-					columns = append(columns, col.Name)
-					val := col.Value
-					// cannot do this SQL, the grade_id column is constrained to *not* be nil (part of the compound primary key for the db)
-					if col.Name == "grade_id" && val == nil {
-						val = 999999
-					}
-					values = append(values, val)
-				}
-				db.InsertTranscriptInfo(columns, values)
-			}
-			err = resp.Body.Close()
-			if err != nil {
-				slog.Error("Unable to close response body", slog.Any("error", err))
-				continue
-			}
-		}
+		processTranscriptList(id, api, &db)
 	}
-	slog.Info("Database transformations")
+	slog.Info("Import Complete")
+
+	slog.Info("Starting Database transformations")
 	// transformation functions
 	err = db.FixNoYearlong()
 	if err != nil {
@@ -132,5 +67,61 @@ func Transcripts(cmd *cobra.Command, args []string) {
 		slog.Error("Unable to insert missing transcript categories", slog.Any("error", err))
 	} else {
 		slog.Info("Fixed missing transcript categories")
+	}
+}
+
+func processTranscriptList(id string, api *blackbaud.BBAPIConnector, db *database.State) {
+	for page := 1; ; page++ {
+		req, err := api.NewRequest(http.MethodGet, blackbaud.AdvancedListApi(id, page), nil)
+		if err != nil {
+			slog.Error("Unable to create request", slog.Any("error", err))
+			continue
+		}
+		resp, err := api.Client.Do(req)
+		if err != nil {
+			slog.Error("Unable to access blackbaud api", slog.Any("error", err))
+			continue
+		}
+		body, err := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			slog.Error("Blackbaud API returned unexpected status code", slog.Any("code", resp.StatusCode), slog.String("body", string(body)))
+			continue
+		}
+
+		var parsed blackbaud.AdvancedList
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			slog.Error("JSON unmarshal failed:", slog.Any("error", err))
+			continue
+		}
+
+		if len(parsed.Results.Rows) == 0 {
+			break // No more data
+		}
+
+		slog.Info("Inserting data from page", slog.Int("page", page))
+
+		for _, row := range parsed.Results.Rows {
+			columns := []string{}
+			values := []any{}
+			for _, col := range row.Columns {
+				columns = append(columns, col.Name)
+				val := col.Value
+				// cannot do this SQL, the grade_id column is constrained to *not* be nil (part of the compound primary key for the db)
+				if col.Name == "grade_id" && val == nil {
+					val = 999999
+				}
+				values = append(values, val)
+			}
+			err := db.InsertTranscriptInfo(columns, values)
+			if err != nil {
+				slog.Error("Unable to insert transcript info", slog.Any("error", err))
+				continue
+			}
+		}
+		err = resp.Body.Close()
+		if err != nil {
+			slog.Error("Unable to close response body", slog.Any("error", err))
+			continue
+		}
 	}
 }

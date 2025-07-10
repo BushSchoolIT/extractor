@@ -35,6 +35,28 @@ type BBAPIConnector struct {
 	StartYear  int
 }
 
+type Column struct {
+	Name  string `json:"name"`
+	Value any    `json:"value"`
+}
+
+type Row struct {
+	Columns []Column `json:"columns"`
+}
+
+type AdvancedList struct {
+	Results struct {
+		Rows []Row `json:"rows"`
+	} `json:"results"`
+	NextLink string `json:"next_link"`
+	Paging   struct {
+		RemainingRows int `json:"remaining_rows"`
+		Page          int `json:"page"`
+		PageSize      int `json:"page_size"`
+		TotalRows     int `json:"total_rows"`
+	} `json:"paging"`
+}
+
 const (
 	TOKEN_URL string = "https://oauth2.sky.blackbaud.com/token"
 	LISTS_API string = "https://api.sky.blackbaud.com/school/v1/lists/advanced"
