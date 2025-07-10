@@ -61,10 +61,11 @@ func (db *State) InsertTranscriptInfo(columns []string, values []any) error {
 	}
 	placeholdersStr := strings.Join(placeholders, ",")
 
-	query := fmt.Sprintf(`INSERT INTO transcripts (%s) VALUES (%s)
-				ON CONFLICT (student_user_id,term_id,group_id,course_id,grade_id) 
-				DO UPDATE SET 
-				(student_first,student_last,grad_year,course_title,course_code,group_description,term_name,grade_description,grade_mode,grade,score,transcript_category,school_year,address_1,address_2,address_3,address_city,address_state,address_zip) = (EXCLUDED.student_first,EXCLUDED.student_last,EXCLUDED.grad_year,EXCLUDED.course_title,EXCLUDED.course_code,EXCLUDED.group_description,EXCLUDED.term_name,EXCLUDED.grade_description,EXCLUDED.grade_mode,EXCLUDED.grade,EXCLUDED.score,EXCLUDED.transcript_category,EXCLUDED.school_year,EXCLUDED.address_1,EXCLUDED.address_2,EXCLUDED.address_3,EXCLUDED.address_city,EXCLUDED.address_state,EXCLUDED.address_zip);`, columnsStr, placeholdersStr)
+	query := fmt.Sprintf(`
+INSERT INTO transcripts (%s) VALUES (%s)
+ON CONFLICT (student_user_id,term_id,group_id,course_id,grade_id) 
+DO UPDATE SET 
+(student_first,student_last,grad_year,course_title,course_code,group_description,term_name,grade_description,grade_mode,grade,score,transcript_category,school_year,address_1,address_2,address_3,address_city,address_state,address_zip) = (EXCLUDED.student_first,EXCLUDED.student_last,EXCLUDED.grad_year,EXCLUDED.course_title,EXCLUDED.course_code,EXCLUDED.group_description,EXCLUDED.term_name,EXCLUDED.grade_description,EXCLUDED.grade_mode,EXCLUDED.grade,EXCLUDED.score,EXCLUDED.transcript_category,EXCLUDED.school_year,EXCLUDED.address_1,EXCLUDED.address_2,EXCLUDED.address_3,EXCLUDED.address_city,EXCLUDED.address_state,EXCLUDED.address_zip);`, columnsStr, placeholdersStr)
 	_, err := db.Conn.Exec(*db.Ctx, query, values...)
 	return err
 }
@@ -97,9 +98,9 @@ func (db *State) FixNoYearlong() error {
 func (db *State) FixNonstandardGrades() error {
 	_, err := db.Conn.Exec(*db.Ctx, `
 WITH transcript_grades AS (
-    SELECT 
+    SELECT
         t.*,
-        CASE 
+        CASE
             WHEN grade IN ('NC', 'CR', 'I', 'WF', 'WP', 'AU') THEN 'non_letter'
             ELSE 'letter'
         END AS grade_type
@@ -136,10 +137,90 @@ by YL grades.
 */
 func (db *State) FixFallYearlongs(year int) error {
 	yearStr := fmt.Sprintf("%d", year)
-	_, err := db.Conn.Exec(*db.Ctx, `UPDATE public.transcripts
-                        SET grade_description = 'current_fall_yl',
-                                grade_id = 666666
-                        WHERE (school_year = $1 AND
-                                grade_description = 'Fall Term Grades YL');`, yearStr)
+	_, err := db.Conn.Exec(*db.Ctx, `
+		UPDATE public.transcripts
+        SET grade_description = 'current_fall_yl',
+        grade_id = 666666
+        WHERE (school_year = $1 AND
+        grade_description = 'Fall Term Grades YL');`,
+		yearStr,
+	)
+	return err
+}
+
+/*
+This function removes records with grade_id = 999999, 888888, 777777, 666666 and restores Fall YL grades.
+This is done to prevent duplicates on a reimport because the grade_id is part of the primary key.
+*/
+func (db *State) TranscriptCleanup(endYear int) error {
+	// List of the the last 4 academic years
+	yearList := []int{}
+	for i := range 5 {
+		yearList = append(yearList, endYear-i)
+	}
+	transcript_query := `
+                DELETE FROM public.transcripts
+                                     WHERE (grade_id = 888888
+                                     OR grade_id = 777777
+                                     OR grade_id = 666666
+                                     OR grade_description = \'Senior Mid-Term Grades\')
+                                     AND school_year = $1
+	`
+	for _, year := range yearList {
+		_, err := db.Conn.Exec(*db.Ctx, transcript_query, fmt.Sprintf("%d - %d", year, year+1))
+		if err != nil {
+			return err
+		}
+	}
+
+	deleteScheduledCourses := `
+UPDATE public.transcripts
+    SET grade_description = 'Fall Term Grades YL', grade_id = 2154180
+    WHERE (school_year != $1 
+    AND grade_id = 666666);
+	`
+	_, err := db.Conn.Exec(*db.Ctx, deleteScheduledCourses, endYear)
+	if err != nil {
+		return err
+	}
+	restoreFallYlQuery := `
+DELETE FROM public.transcripts
+    WHERE grade_id = 999999
+	`
+	_, err = db.Conn.Exec(*db.Ctx, restoreFallYlQuery)
+	return err
+}
+
+/*
+This function will insert transcript categories where none exist.
+This is always the case for grade_id = 999999 as they do not exist for scheduled courses.
+The transcript categories are identified based on the course prefix, which is the first
+word in the course code. The transcript category mappings are stored in the public.course_codes table, which needs to
+be manually kept up to date until we can get a better solution.
+*/
+func (db *State) InsertMissingTranscriptCategories() error {
+	_, err := db.Conn.Exec(*db.Ctx,
+		`
+        WITH ranked_prefixes AS (
+            SELECT
+                transcripts.course_code,
+                course_codes.transcript_category,
+                ROW_NUMBER() OVER (PARTITION BY transcripts.course_code ORDER BY LENGTH(course_codes.course_prefix) DESC) AS rn
+            FROM
+                public.transcripts
+            JOIN
+                public.course_codes
+            ON
+                transcripts.course_code::text LIKE course_codes.course_prefix || '%'
+            WHERE
+                transcripts.transcript_category = 'NaN'
+        )
+        UPDATE public.transcripts
+        SET transcript_category = ranked_prefixes.transcript_category
+        FROM ranked_prefixes
+        WHERE public.transcripts.course_code = ranked_prefixes.course_code
+        AND public.transcripts.transcript_category = 'NaN'
+        AND ranked_prefixes.rn = 1;
+	`)
 	return err
 }

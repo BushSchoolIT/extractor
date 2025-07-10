@@ -99,6 +99,7 @@ func Transcripts(cmd *cobra.Command, args []string) {
 			}
 			err = resp.Body.Close()
 			if err != nil {
+				slog.Error("Unable to close response body", slog.Any("error", err))
 				continue
 			}
 		}
