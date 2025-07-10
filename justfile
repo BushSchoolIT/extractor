@@ -2,4 +2,4 @@ default:
     just --list
 
 build:
-    go build -o extractor
+    go build -o bbextract

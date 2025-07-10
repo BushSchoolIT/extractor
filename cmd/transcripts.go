@@ -104,9 +104,33 @@ func Transcripts(cmd *cobra.Command, args []string) {
 			}
 		}
 	}
+	slog.Info("Database transformations")
 	// transformation functions
-	db.FixNoYearlong()
-	db.FixNonstandardGrades()
-	db.FixFallYearlongs(api.StartYear, api.EndYear)
-	db.InsertMissingTranscriptCategories()
+	err = db.FixNoYearlong()
+	if err != nil {
+		slog.Error("Unable to fix yearlongs", slog.Any("error", err))
+	} else {
+		slog.Info("Fixed yearlongs")
+	}
+
+	err = db.FixNonstandardGrades()
+	if err != nil {
+		slog.Error("Unable to fix nonstandard grades", slog.Any("error", err))
+	} else {
+		slog.Info("Fixed nonstandard grades")
+	}
+
+	err = db.FixFallYearlongs(api.StartYear, api.EndYear)
+	if err != nil {
+		slog.Error("Unable to fix fall yearlongs", slog.Any("error", err))
+	} else {
+		slog.Info("Fixed fall yearlongs")
+	}
+
+	err = db.InsertMissingTranscriptCategories()
+	if err != nil {
+		slog.Error("Unable to insert missing transcript categories", slog.Any("error", err))
+	} else {
+		slog.Info("Fixed missing transcript categories")
+	}
 }

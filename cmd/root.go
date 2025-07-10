@@ -12,8 +12,8 @@ import (
 
 var (
 	rootCmd = &cobra.Command{
-		Use:   "extractor",
-		Short: "extractor is the successor to BlackBaudExtractor rewritten in Go",
+		Use:   "bbextract",
+		Short: "bbextract is the successor to BlackBaudExtractor rewritten in Go",
 	}
 	transcriptCmd = &cobra.Command{
 		Use:   "transcripts",
