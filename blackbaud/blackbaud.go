@@ -57,6 +57,12 @@ type AdvancedList struct {
 	} `json:"paging"`
 }
 
+type Parent struct {
+	FirstName string
+	LastName  string
+	Grades    []int
+}
+
 const (
 	TOKEN_URL string = "https://oauth2.sky.blackbaud.com/token"
 	LISTS_API string = "https://api.sky.blackbaud.com/school/v1/lists/advanced"
@@ -160,6 +166,27 @@ func refreshToken(config *Config) error {
 	return resp.Body.Close()
 }
 
+func (b *BBAPIConnector) GetAdvancedList(id string, page int) (AdvancedList, error) {
+	req, err := b.NewRequest(http.MethodGet, AdvancedListApi(id, page), nil)
+	if err != nil {
+		return AdvancedList{}, fmt.Errorf("Unable to create request: %v", err)
+	}
+	resp, err := b.Client.Do(req)
+	if err != nil {
+		return AdvancedList{}, fmt.Errorf("Unable to access blackbaud api: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return AdvancedList{}, fmt.Errorf("Blackbaud API returned unexpected status code, code: %d, body: %s", resp.StatusCode, string(body))
+	}
+
+	var parsed AdvancedList
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return AdvancedList{}, fmt.Errorf("JSON unmarshal failed: %v", err)
+	}
+	return parsed, resp.Body.Close()
+}
+
 func (b *BBAPIConnector) NewRequest(method string, url string, body io.Reader) (*http.Request, error) {
 	req, err := http.NewRequest(method, url, body)
 
@@ -259,4 +286,30 @@ func getYears(connector *BBAPIConnector) (int, int, error) {
 
 func AdvancedListApi(id string, page int) string {
 	return fmt.Sprintf("%s/%s?page=%d", LISTS_API, id, page)
+}
+
+type ProcessedRow struct {
+	Columns []string
+	Values  []any
+}
+
+// this function take in the raw row data from the API and transforms it into a more "usable" ProcessedRow for inserting into the database, the `proc` function is a function that accepts a string name (column) and the associated value, and does operations that returns a new one, the boolean is for if you want to add it to the db or not
+func ProcessBlackbaudRows(rows []Row, proc func(string, any) (string, any, bool)) []ProcessedRow {
+	ret := []ProcessedRow{}
+	for _, row := range rows {
+		columns := []string{}
+		values := []any{}
+		for _, col := range row.Columns {
+			k, v, ok := proc(col.Name, col.Value)
+			if ok {
+				columns = append(columns, k)
+				values = append(values, v)
+			}
+		}
+		ret = append(ret, ProcessedRow{
+			Columns: columns,
+			Values:  values,
+		})
+	}
+	return ret
 }

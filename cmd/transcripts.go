@@ -1,10 +1,7 @@
 package cmd
 
 import (
-	"encoding/json"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 
 	"github.com/BushSchoolIT/extractor/blackbaud"
@@ -31,97 +28,37 @@ func Transcripts(cmd *cobra.Command, args []string) {
 	}
 	defer db.Close()
 	// actual logic
-	db.TranscriptCleanup(api.EndYear)
 
+	t := []blackbaud.ProcessedRow{}
 	for _, id := range config.TranscriptListIDs {
 		slog.Info("Processing List", slog.String("id", id))
-		processTranscriptList(id, api, &db)
+		for page := 1; ; page++ {
+			parsed, err := api.GetAdvancedList(id, page)
+			if err != nil {
+				slog.Error("Unable to get advanced list", slog.String("id", id), slog.Int("page", page))
+				continue
+			}
+			if len(parsed.Results.Rows) == 0 {
+				break // No more data
+			}
+
+			slog.Info("Collecting Data From Page", slog.Int("page", page))
+			t = append(t, blackbaud.ProcessBlackbaudRows(parsed.Results.Rows, transcriptProcess)...)
+		}
 	}
 	slog.Info("Import Complete")
 
 	slog.Info("Starting Database transformations")
-	// transformation functions
-	err = db.FixNoYearlong()
+	err = db.TranscriptOps(t, api.StartYear, api.EndYear)
 	if err != nil {
-		slog.Error("Unable to fix yearlongs", slog.Any("error", err))
-	} else {
-		slog.Info("Fixed yearlongs")
-	}
-
-	err = db.FixNonstandardGrades()
-	if err != nil {
-		slog.Error("Unable to fix nonstandard grades", slog.Any("error", err))
-	} else {
-		slog.Info("Fixed nonstandard grades")
-	}
-
-	err = db.FixFallYearlongs(api.StartYear, api.EndYear)
-	if err != nil {
-		slog.Error("Unable to fix fall yearlongs", slog.Any("error", err))
-	} else {
-		slog.Info("Fixed fall yearlongs")
-	}
-
-	err = db.InsertMissingTranscriptCategories()
-	if err != nil {
-		slog.Error("Unable to insert missing transcript categories", slog.Any("error", err))
-	} else {
-		slog.Info("Fixed missing transcript categories")
+		slog.Error("Unable to complete transcript operations", slog.Any("error", err))
+		os.Exit(1)
 	}
 }
 
-func processTranscriptList(id string, api *blackbaud.BBAPIConnector, db *database.State) {
-	for page := 1; ; page++ {
-		req, err := api.NewRequest(http.MethodGet, blackbaud.AdvancedListApi(id, page), nil)
-		if err != nil {
-			slog.Error("Unable to create request", slog.Any("error", err))
-			continue
-		}
-		resp, err := api.Client.Do(req)
-		if err != nil {
-			slog.Error("Unable to access blackbaud api", slog.Any("error", err))
-			continue
-		}
-		body, err := io.ReadAll(resp.Body)
-		if resp.StatusCode != http.StatusOK {
-			slog.Error("Blackbaud API returned unexpected status code", slog.Any("code", resp.StatusCode), slog.String("body", string(body)))
-			continue
-		}
-
-		var parsed blackbaud.AdvancedList
-		if err := json.Unmarshal(body, &parsed); err != nil {
-			slog.Error("JSON unmarshal failed:", slog.Any("error", err))
-			continue
-		}
-
-		if len(parsed.Results.Rows) == 0 {
-			break // No more data
-		}
-
-		slog.Info("Inserting data from page", slog.Int("page", page))
-
-		for _, row := range parsed.Results.Rows {
-			columns := []string{}
-			values := []any{}
-			for _, col := range row.Columns {
-				columns = append(columns, col.Name)
-				val := col.Value
-				// cannot do this SQL, the grade_id column is constrained to *not* be nil (part of the compound primary key for the db)
-				if col.Name == "grade_id" && val == nil {
-					val = 999999
-				}
-				values = append(values, val)
-			}
-			err := db.InsertTranscriptInfo(columns, values)
-			if err != nil {
-				slog.Error("Unable to insert transcript info", slog.Any("error", err))
-				continue
-			}
-		}
-		err = resp.Body.Close()
-		if err != nil {
-			slog.Error("Unable to close response body", slog.Any("error", err))
-			continue
-		}
+func transcriptProcess(k string, v any) (string, any, bool) {
+	if k == "grade_id" && v == nil {
+		v = 999999
 	}
+	return k, v, true
 }

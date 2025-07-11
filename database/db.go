@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/BushSchoolIT/extractor/blackbaud"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -47,7 +48,52 @@ func (db *State) Close() error {
 	return db.Conn.Close(*db.Ctx)
 }
 
-// TODO make the other DB transformations/cleanups
+func (db *State) InsertEmails(parents map[string]blackbaud.Parent) error {
+	tx, err := db.Conn.BeginTx(*db.Ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+
+	emails := make([]string, 0, len(parents))
+	for e, p := range parents {
+		emails = append(emails, e)
+		_, err := tx.Exec(*db.Ctx,
+			`
+INSERT INTO parents (email, first_name, last_name, grade)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (email) DO UPDATE SET
+  first_name = EXCLUDED.first_name,
+  last_name = EXCLUDED.last_name,
+  grade = EXCLUDED.grade;
+`,
+			e, p.FirstName, p.LastName, p.Grades)
+		if err != nil {
+			tx.Rollback(*db.Ctx)
+			return err
+		}
+	}
+	_, err = tx.Exec(*db.Ctx, `DELETE FROM parents WHERE email != ALL($1)`, emails)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
+	}
+	return tx.Commit(*db.Ctx)
+}
+
+// query helper funcs
+func rowsInsertHelper(tx pgx.Tx, ctx *context.Context, rows []blackbaud.ProcessedRow, query string) error {
+	for _, row := range rows {
+		q, err := colInsertHelper(row.Columns, row.Values, query)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(*ctx, q)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func colInsertHelper(columns []string, values []any, query string) (string, error) {
 	if len(columns) != len(values) {
@@ -65,20 +111,63 @@ func colInsertHelper(columns []string, values []any, query string) (string, erro
 	return fmt.Sprintf(query, columnsStr, placeholdersStr), nil
 }
 
-func (db *State) InsertTranscriptInfo(columns []string, values []any) error {
-	query, err := colInsertHelper(columns, values, `
+func (db *State) TranscriptOps(t []blackbaud.ProcessedRow, startYear int, endYear int) error {
+	tx, err := db.Conn.BeginTx(*db.Ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	err = transcriptCleanup(db.Ctx, tx, endYear)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
+	}
+	err = rowsInsertHelper(tx, db.Ctx, t, `
 INSERT INTO transcripts (%s) VALUES (%s)
 ON CONFLICT (student_user_id,term_id,group_id,course_id,grade_id) 
 DO UPDATE SET 
 (student_first,student_last,grad_year,course_title,course_code,group_description,term_name,grade_description,grade_mode,grade,score,transcript_category,school_year,address_1,address_2,address_3,address_city,address_state,address_zip) = (EXCLUDED.student_first,EXCLUDED.student_last,EXCLUDED.grad_year,EXCLUDED.course_title,EXCLUDED.course_code,EXCLUDED.group_description,EXCLUDED.term_name,EXCLUDED.grade_description,EXCLUDED.grade_mode,EXCLUDED.grade,EXCLUDED.score,EXCLUDED.transcript_category,EXCLUDED.school_year,EXCLUDED.address_1,EXCLUDED.address_2,EXCLUDED.address_3,EXCLUDED.address_city,EXCLUDED.address_state,EXCLUDED.address_zip);`)
 	if err != nil {
+		tx.Rollback(*db.Ctx)
 		return err
 	}
-	_, err = db.Conn.Exec(*db.Ctx, query, values...)
-	return err
+	err = fixNoYearlong(db.Ctx, tx)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
+	}
+	err = fixNonstandardGrades(db.Ctx, tx)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
+	}
+	err = fixFallYearlongs(db.Ctx, tx, startYear, endYear)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
+	}
+	err = insertMissingTranscriptCategories(db.Ctx, tx)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
+	}
+	return tx.Commit(*db.Ctx)
 }
 
-func (db *State) InsertEnrollmentInfo(columns []string, values []any) error {
+// transcript helpers
+// func insertTranscriptInfo(ctx *context.Context, tx pgx.Tx, columns []string, values []any) error {
+// 	query, err := rowsInsertHelper(columns, values, `
+// INSERT INTO transcripts (%s) VALUES (%s)
+// ON CONFLICT (student_user_id,term_id,group_id,course_id,grade_id)
+// DO UPDATE SET
+// (student_first,student_last,grad_year,course_title,course_code,group_description,term_name,grade_description,grade_mode,grade,score,transcript_category,school_year,address_1,address_2,address_3,address_city,address_state,address_zip) = (EXCLUDED.student_first,EXCLUDED.student_last,EXCLUDED.grad_year,EXCLUDED.course_title,EXCLUDED.course_code,EXCLUDED.group_description,EXCLUDED.term_name,EXCLUDED.grade_description,EXCLUDED.grade_mode,EXCLUDED.grade,EXCLUDED.score,EXCLUDED.transcript_category,EXCLUDED.school_year,EXCLUDED.address_1,EXCLUDED.address_2,EXCLUDED.address_3,EXCLUDED.address_city,EXCLUDED.address_state,EXCLUDED.address_zip);`)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	_, err = tx.Exec(*ctx, query, values...)
+// 	return err
+// }
+
+func insertEnrollmentInfo(ctx *context.Context, tx pgx.Tx, columns []string, values []any) error {
 	query, err := colInsertHelper(columns, values, `
 INSERT INTO enrollment (%s) VALUES %s
 ON CONFLICT (student_user_id) 
@@ -88,13 +177,13 @@ DO UPDATE SET
 	if err != nil {
 		return err
 	}
-	_, err = db.Conn.Exec(*db.Ctx, query, values...)
+	_, err = tx.Exec(*ctx, query, values...)
 	return err
 }
 
 // transformation used in the transcript ETL, used for taking yearlong courses with only 1 grade and fixing them to have both grades and be graded for both semesters
-func (db *State) FixNoYearlong() error {
-	_, err := db.Conn.Exec(*db.Ctx, `
+func fixNoYearlong(ctx *context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(*ctx, `
 		WITH potential_updates AS (
 			SELECT student_user_id, school_year, course_id
 			FROM public.transcripts
@@ -117,8 +206,8 @@ func (db *State) FixNoYearlong() error {
 }
 
 // fixes classes that use credit no credit or "audit", or with specific failing grades
-func (db *State) FixNonstandardGrades() error {
-	_, err := db.Conn.Exec(*db.Ctx, `
+func fixNonstandardGrades(ctx *context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(*ctx, `
 WITH transcript_grades AS (
     SELECT
         t.*,
@@ -157,9 +246,9 @@ Reassigns grade_id for Fall YL grades when the year is the current year. We need
 allow them to show up in powerBI. Typically Fll YL grades are filtered out because they are overwritten
 by YL grades.
 */
-func (db *State) FixFallYearlongs(startYear int, endYear int) error {
+func fixFallYearlongs(ctx *context.Context, tx pgx.Tx, startYear int, endYear int) error {
 	yearStr := fmt.Sprintf("%d - %d", startYear, endYear)
-	_, err := db.Conn.Exec(*db.Ctx, `
+	_, err := tx.Exec(*ctx, `
 		UPDATE public.transcripts
         SET grade_description = 'current_fall_yl',
         grade_id = 666666
@@ -171,10 +260,10 @@ func (db *State) FixFallYearlongs(startYear int, endYear int) error {
 }
 
 /*
-This function removes records with grade_id = 999999, 888888, 777777, 666666 and restores Fall YL grades.
+This function tx *pgx.Tx, removes records with grade_id = 999999, 888888, 777777, 666666 and restores Fall YL grades.
 This is done to prevent duplicates on a reimport because the grade_id is part of the primary key.
 */
-func (db *State) TranscriptCleanup(endYear int) error {
+func transcriptCleanup(ctx *context.Context, tx pgx.Tx, endYear int) error {
 	// List of the the last 4 academic years
 	yearList := []int{}
 	for i := range 5 {
@@ -189,7 +278,7 @@ func (db *State) TranscriptCleanup(endYear int) error {
                                      AND school_year = $1
 	`
 	for _, year := range yearList {
-		_, err := db.Conn.Exec(*db.Ctx, transcript_query, fmt.Sprintf("%d - %d", year, year+1))
+		_, err := tx.Exec(*ctx, transcript_query, fmt.Sprintf("%d - %d", year, year+1))
 		if err != nil {
 			return err
 		}
@@ -201,7 +290,7 @@ UPDATE public.transcripts
     WHERE (school_year != $1 
     AND grade_id = 666666);
 	`
-	_, err := db.Conn.Exec(*db.Ctx, deleteScheduledCourses, endYear)
+	_, err := tx.Exec(*ctx, deleteScheduledCourses, endYear)
 	if err != nil {
 		return err
 	}
@@ -209,20 +298,19 @@ UPDATE public.transcripts
 DELETE FROM public.transcripts
     WHERE grade_id = 999999
 	`
-	_, err = db.Conn.Exec(*db.Ctx, restoreFallYlQuery)
+	_, err = tx.Exec(*ctx, restoreFallYlQuery)
 	return err
 }
 
 /*
-This function will insert transcript categories where none exist.
+This function tx *pgx.Tx, will insert transcript categories where none exist.
 This is always the case for grade_id = 999999 as they do not exist for scheduled courses.
 The transcript categories are identified based on the course prefix, which is the first
 word in the course code. The transcript category mappings are stored in the public.course_codes table, which needs to
 be manually kept up to date until we can get a better solution.
 */
-func (db *State) InsertMissingTranscriptCategories() error {
-	_, err := db.Conn.Exec(*db.Ctx,
-		`
+func insertMissingTranscriptCategories(ctx *context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(*ctx, `
         WITH ranked_prefixes AS (
             SELECT
                 transcripts.course_code,
@@ -247,16 +335,4 @@ func (db *State) InsertMissingTranscriptCategories() error {
 	return err
 }
 
-func (db *State) InsertEmail(email string, firstName string, lastName string, grades []int) error {
-	_, err := db.Conn.Exec(*db.Ctx,
-		`
-INSERT INTO parents (email, first_name, last_name, grade)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (email) DO UPDATE SET
-  first_name = EXCLUDED.first_name,
-  last_name = EXCLUDED.last_name,
-  grade = EXCLUDED.grade;
-`,
-		email, firstName, lastName, grades)
-	return err
-}
+// end transcript helpers

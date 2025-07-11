@@ -35,26 +35,9 @@ func Parents(cmd *cobra.Command, args []string) {
 	defer db.Close()
 
 	for page := 1; ; page++ {
-		req, err := api.NewRequest(http.MethodGet, blackbaud.AdvancedListApi(config.ParentsID, page), nil)
+		parsed, err := api.GetAdvancedList(config.ParentsID, page)
 		if err != nil {
-			slog.Error("Unable to create request", slog.Any("error", err))
-			continue
-		}
-		resp, err := api.Client.Do(req)
-		if err != nil {
-			slog.Error("Unable to access blackbaud api", slog.Any("error", err))
-			continue
-		}
-		body, err := io.ReadAll(resp.Body)
-
-		if resp.StatusCode != http.StatusOK {
-			slog.Error("Blackbaud API returned unexpected status code", slog.Any("code", resp.StatusCode), slog.String("body", string(body)))
-			continue
-		}
-
-		var parsed blackbaud.AdvancedList
-		if err := json.Unmarshal(body, &parsed); err != nil {
-			slog.Error("JSON unmarshal failed:", slog.Any("error", err))
+			slog.Error("Unable to get advanced list", slog.String("id", config.ParentsID), slog.Int("page", page))
 			continue
 		}
 
@@ -64,10 +47,10 @@ func Parents(cmd *cobra.Command, args []string) {
 
 		slog.Info("Inserting data from page", slog.Int("page", page))
 
+		parents := map[string]blackbaud.Parent{}
 		for _, row := range parsed.Results.Rows {
-			parent := map[string]string{}
-			grades := []int{}
-
+			parent := blackbaud.Parent{}
+			email := ""
 			for _, col := range row.Columns {
 				if col.Value == nil {
 					continue
@@ -75,27 +58,26 @@ func Parents(cmd *cobra.Command, args []string) {
 				val := fmt.Sprintf("%v", col.Value)
 				switch {
 				case col.Name == "email":
-					parent["email"] = val
+					email = val
 				case col.Name == "first_name":
-					parent["first_name"] = val
+					parent.FirstName = val
 				case col.Name == "last_name":
-					parent["last_name"] = val
+					parent.LastName = val
 				// different casing because blackbaud is weird
 				case strings.HasPrefix(col.Name, "Grad"):
 					if gradYear, err := strconv.Atoi(val); err == nil {
 						if grade := gradYearToGrade(gradYear, api.EndYear); grade >= 0 && grade <= 12 {
-							grades = append(grades, grade)
+							parent.Grades = append(parent.Grades, grade)
 						}
 					}
 				}
 			}
 
-			if email := strings.TrimSpace(parent["email"]); email != "" && len(grades) > 0 {
-				if err := db.InsertEmail(email, parent["first_name"], parent["last_name"], grades); err != nil {
-					slog.Error("Unable to add email", slog.Any("error", err))
-				}
+			if email := strings.TrimSpace(email); email != "" && len(parent.Grades) > 0 {
+				parents[email] = parent
 			}
 		}
+		db.InsertEmails(parents)
 		err = resp.Body.Close()
 		if err != nil {
 			slog.Error("Unable to close response body", slog.Any("error", err))
