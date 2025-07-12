@@ -29,7 +29,7 @@ func Transcripts(cmd *cobra.Command, args []string) {
 	defer db.Close()
 	// actual logic
 
-	t := []blackbaud.ProcessedRow{}
+	t := blackbaud.UnorderedTable{}
 	for _, id := range config.TranscriptListIDs {
 		slog.Info("Processing List", slog.String("id", id))
 		for page := 1; ; page++ {
@@ -41,9 +41,21 @@ func Transcripts(cmd *cobra.Command, args []string) {
 			if len(parsed.Results.Rows) == 0 {
 				break // No more data
 			}
+			if len(t.Columns) == 0 {
+				t.Columns = getColumns(parsed.Results.Rows[0])
+			}
 
 			slog.Info("Collecting Data From Page", slog.Int("page", page))
-			t = append(t, blackbaud.ProcessBlackbaudRows(parsed.Results.Rows, transcriptProcess)...)
+			for _, row := range parsed.Results.Rows {
+				newRow := []any{}
+				for _, col := range row.Columns {
+					if col.Name == "grade_id" && col.Value == nil {
+						col.Value = 999999
+					}
+					newRow = append(newRow, col.Value)
+				}
+				t.Rows = append(t.Rows, newRow)
+			}
 		}
 	}
 	slog.Info("Import Complete")
@@ -56,9 +68,10 @@ func Transcripts(cmd *cobra.Command, args []string) {
 	}
 }
 
-func transcriptProcess(k string, v any) (string, any, bool) {
-	if k == "grade_id" && v == nil {
-		v = 999999
+func getColumns(row blackbaud.Row) []string {
+	columns := []string{}
+	for _, col := range row.Columns {
+		columns = append(columns, col.Name)
 	}
-	return k, v, true
+	return columns
 }

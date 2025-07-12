@@ -288,28 +288,8 @@ func AdvancedListApi(id string, page int) string {
 	return fmt.Sprintf("%s/%s?page=%d", LISTS_API, id, page)
 }
 
-type ProcessedRow struct {
+// Thin Datastructure used for processing and inserting into the DB :)
+type UnorderedTable struct {
 	Columns []string
-	Values  []any
-}
-
-// this function take in the raw row data from the API and transforms it into a more "usable" ProcessedRow for inserting into the database, the `proc` function is a function that accepts a string name (column) and the associated value, and does operations that returns a new one, the boolean is for if you want to add it to the db or not
-func ProcessBlackbaudRows(rows []Row, proc func(string, any) (string, any, bool)) []ProcessedRow {
-	ret := []ProcessedRow{}
-	for _, row := range rows {
-		columns := []string{}
-		values := []any{}
-		for _, col := range row.Columns {
-			k, v, ok := proc(col.Name, col.Value)
-			if ok {
-				columns = append(columns, k)
-				values = append(values, v)
-			}
-		}
-		ret = append(ret, ProcessedRow{
-			Columns: columns,
-			Values:  values,
-		})
-	}
-	return ret
+	Rows    [][]any
 }

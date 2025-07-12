@@ -3,6 +3,9 @@ package database
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/BushSchoolIT/extractor/blackbaud"
@@ -48,70 +51,74 @@ func (db *State) Close() error {
 	return db.Conn.Close(*db.Ctx)
 }
 
-func (db *State) InsertEmails(parents map[string]blackbaud.Parent) error {
+func (db *State) InsertEmails(t blackbaud.UnorderedTable) error {
 	tx, err := db.Conn.BeginTx(*db.Ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
+	primaryKeys := map[string]bool{
+		"email": true,
+	}
 
-	emails := make([]string, 0, len(parents))
-	for e, p := range parents {
-		emails = append(emails, e)
-		_, err := tx.Exec(*db.Ctx,
-			`
-INSERT INTO parents (email, first_name, last_name, grade)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (email) DO UPDATE SET
-  first_name = EXCLUDED.first_name,
-  last_name = EXCLUDED.last_name,
-  grade = EXCLUDED.grade;
-`,
-			e, p.FirstName, p.LastName, p.Grades)
+	// remove null primary keys
+	removeNull(primaryKeys, t)
+	query := fmt.Sprintf(`
+	INSERT INTO parents (%s) VALUES (%s)
+	ON CONFLICT (%s)
+	DO UPDATE SET %s;`,
+		strings.Join(t.Columns, ","),
+		placeHolders(len(t.Columns)),
+		strings.Join(slices.Collect(maps.Keys(primaryKeys)), ","),
+		updateAssignments(t.Columns, primaryKeys),
+	)
+	slog.Info("Query", slog.String("query", query))
+	for _, row := range t.Rows {
+		slog.Info("Found row", slog.Any("row", row))
+		_, err = tx.Exec(*db.Ctx, query, row...)
 		if err != nil {
 			tx.Rollback(*db.Ctx)
 			return err
 		}
 	}
-	_, err = tx.Exec(*db.Ctx, `DELETE FROM parents WHERE email != ALL($1)`, emails)
-	if err != nil {
-		tx.Rollback(*db.Ctx)
-		return err
-	}
 	return tx.Commit(*db.Ctx)
 }
 
-// query helper funcs
-func rowsInsertHelper(tx pgx.Tx, ctx *context.Context, rows []blackbaud.ProcessedRow, query string) error {
-	for _, row := range rows {
-		q, err := colInsertHelper(row.Columns, row.Values, query)
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(*ctx, q)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func colInsertHelper(columns []string, values []any, query string) (string, error) {
-	if len(columns) != len(values) {
-		return "", fmt.Errorf("columns and values length mismatch")
-	}
-	columnsStr := strings.Join(columns, ",")
-
-	// Build placeholders like $1, $2, ..., $N
-	placeholders := make([]string, len(values))
-	for i := range values {
+// Build SQL placeholders like $1, $2, ..., $N
+func placeHolders(count int) string {
+	placeholders := make([]string, count)
+	for i := range count {
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 	}
-	placeholdersStr := strings.Join(placeholders, ",")
-
-	return fmt.Sprintf(query, columnsStr, placeholdersStr), nil
+	return strings.Join(placeholders, ",")
 }
 
-func (db *State) TranscriptOps(t []blackbaud.ProcessedRow, startYear int, endYear int) error {
+func removeNull(keys map[string]bool, t blackbaud.UnorderedTable) {
+	for i := len(t.Rows) - 1; i >= 0; i-- {
+		row := t.Rows[i]
+		for j, col := range row {
+			if keys[t.Columns[j]] && col == nil {
+				t.Rows = slices.Delete(t.Rows, i, i+1)
+				break
+			}
+		}
+	}
+}
+
+func updateAssignments(columns []string, conflicts map[string]bool) string {
+	updateAssignments := ""
+	for i, col := range columns {
+		if conflicts[col] {
+			continue // skip conflict key columns
+		}
+		if i != 0 {
+			updateAssignments += ", "
+		}
+		updateAssignments += fmt.Sprintf("%s = EXCLUDED.%s", col, col)
+	}
+	return updateAssignments
+}
+
+func (db *State) TranscriptOps(t blackbaud.UnorderedTable, startYear int, endYear int) error {
 	tx, err := db.Conn.BeginTx(*db.Ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -121,14 +128,33 @@ func (db *State) TranscriptOps(t []blackbaud.ProcessedRow, startYear int, endYea
 		tx.Rollback(*db.Ctx)
 		return err
 	}
-	err = rowsInsertHelper(tx, db.Ctx, t, `
-INSERT INTO transcripts (%s) VALUES (%s)
-ON CONFLICT (student_user_id,term_id,group_id,course_id,grade_id) 
-DO UPDATE SET 
-(student_first,student_last,grad_year,course_title,course_code,group_description,term_name,grade_description,grade_mode,grade,score,transcript_category,school_year,address_1,address_2,address_3,address_city,address_state,address_zip) = (EXCLUDED.student_first,EXCLUDED.student_last,EXCLUDED.grad_year,EXCLUDED.course_title,EXCLUDED.course_code,EXCLUDED.group_description,EXCLUDED.term_name,EXCLUDED.grade_description,EXCLUDED.grade_mode,EXCLUDED.grade,EXCLUDED.score,EXCLUDED.transcript_category,EXCLUDED.school_year,EXCLUDED.address_1,EXCLUDED.address_2,EXCLUDED.address_3,EXCLUDED.address_city,EXCLUDED.address_state,EXCLUDED.address_zip);`)
-	if err != nil {
-		tx.Rollback(*db.Ctx)
-		return err
+
+	// upsert query: https://neon.com/postgresql/postgresql-tutorial/postgresql-upsert
+	primaryKeys := map[string]bool{
+		"student_user_id": true,
+		"term_id":         true,
+		"group_id":        true,
+		"course_id":       true,
+		"grade_id":        true,
+	}
+	// remove null primary keys
+	removeNull(primaryKeys, t)
+	query := fmt.Sprintf(`
+	INSERT INTO transcripts (%s) VALUES (%s)
+	ON CONFLICT (%s)
+	DO UPDATE SET %s;`,
+		strings.Join(t.Columns, ","),
+		placeHolders(len(t.Columns)),
+		strings.Join(slices.Collect(maps.Keys(primaryKeys)), ","),
+		updateAssignments(t.Columns, primaryKeys),
+	)
+
+	for _, row := range t.Rows {
+		_, err := tx.Exec(*db.Ctx, query, row...)
+		if err != nil {
+			tx.Rollback(*db.Ctx)
+			return err
+		}
 	}
 	err = fixNoYearlong(db.Ctx, tx)
 	if err != nil {
@@ -167,19 +193,19 @@ DO UPDATE SET
 // 	return err
 // }
 
-func insertEnrollmentInfo(ctx *context.Context, tx pgx.Tx, columns []string, values []any) error {
-	query, err := colInsertHelper(columns, values, `
-INSERT INTO enrollment (%s) VALUES %s
-ON CONFLICT (student_user_id) 
-DO UPDATE SET 
-(student_first,student_last,grad_year,enroll_date, graduated, enroll_grade, enroll_year) = (EXCLUDED.student_first,EXCLUDED.student_last,EXCLUDED.grad_year,EXCLUDED.enroll_date, EXCLUDED.graduated, EXCLUDED.enroll_grade, EXCLUDED.enroll_year);
-	`)
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(*ctx, query, values...)
-	return err
-}
+// func insertEnrollmentInfo(ctx *context.Context, tx pgx.Tx, columns []string, values []any) error {
+// 	query, err := colInsertHelper(columns, values, `
+// INSERT INTO enrollment (%s) VALUES %s
+// ON CONFLICT (student_user_id)
+// DO UPDATE SET
+// (student_first,student_last,grad_year,enroll_date, graduated, enroll_grade, enroll_year) = (EXCLUDED.student_first,EXCLUDED.student_last,EXCLUDED.grad_year,EXCLUDED.enroll_date, EXCLUDED.graduated, EXCLUDED.enroll_grade, EXCLUDED.enroll_year);
+// 	`)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	_, err = tx.Exec(*ctx, query, values...)
+// 	return err
+// }
 
 // transformation used in the transcript ETL, used for taking yearlong courses with only 1 grade and fixing them to have both grades and be graded for both semesters
 func fixNoYearlong(ctx *context.Context, tx pgx.Tx) error {
