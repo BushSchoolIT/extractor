@@ -4,7 +4,7 @@
   "parents_list_id": "166297",
   "enrollment_list_ids": {
     "departed": "159435",
-    "current": "159436"
+    "enrolled": "159436"
   },
   "attendance": {
     "level_ids": ["781", "780", "779"]

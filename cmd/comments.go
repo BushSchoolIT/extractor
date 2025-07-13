@@ -29,30 +29,7 @@ func Comments(cmd *cobra.Command, args []string) {
 	defer db.Close()
 	// actual logic
 
-	t := blackbaud.UnorderedTable{}
-	for page := 1; ; page++ {
-		parsed, err := api.GetAdvancedList(config.TranscriptCommentsID, page)
-		if err != nil {
-			slog.Error("Unable to get advanced list", slog.String("id", config.TranscriptCommentsID), slog.Int("page", page))
-			continue
-		}
-		if len(parsed.Results.Rows) == 0 {
-			break // No more data
-		}
-		if len(t.Columns) == 0 {
-			t.Columns = getColumns(parsed.Results.Rows[0])
-		}
-
-		slog.Info("Collecting Data From Page", slog.Int("page", page), slog.String("id", config.TranscriptCommentsID))
-		for _, row := range parsed.Results.Rows {
-			newRow := []any{}
-			for _, col := range row.Columns {
-				newRow = append(newRow, col.Value)
-			}
-			t.Rows = append(t.Rows, newRow)
-		}
-	}
-
+	t := processList(api, config.TranscriptCommentsID)
 	slog.Info("Import Complete")
 
 	slog.Info("Starting Database transformations")

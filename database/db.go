@@ -217,6 +217,78 @@ func (db *State) TranscriptOps(t blackbaud.UnorderedTable, startYear int, endYea
 	return tx.Commit(*db.Ctx)
 }
 
+func (db *State) EnrollmentOps(enrolled blackbaud.UnorderedTable, departed blackbaud.UnorderedTable) error {
+	tx, err := db.Conn.BeginTx(*db.Ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	// remove null primary keys
+	primaryKeys := map[string]bool{
+		"student_user_id": true,
+	}
+	removeNull(primaryKeys, enrolled)
+	enrolledInsert := fmt.Sprintf(`
+	INSERT INTO enrollment (%s) VALUES (%s)
+	ON CONFLICT (%s)
+	DO UPDATE SET %s;`,
+		strings.Join(enrolled.Columns, ","),
+		placeHolders(len(enrolled.Columns)),
+		strings.Join(slices.Collect(maps.Keys(primaryKeys)), ","),
+		updateAssignments(enrolled.Columns, primaryKeys),
+	)
+	for _, row := range enrolled.Rows {
+		cmd, err := tx.Exec(*db.Ctx, enrolledInsert, row...)
+		if err != nil {
+			tx.Rollback(*db.Ctx)
+			return fmt.Errorf("db insert failed: %v, cmd: %s, query: %s", err, cmd.String(), enrolledInsert)
+		}
+	}
+	departedInsert := fmt.Sprintf(`
+	INSERT INTO enrollment (%s) VALUES (%s)
+	ON CONFLICT (%s)
+	DO UPDATE SET %s;`,
+		strings.Join(departed.Columns, ","),
+		placeHolders(len(departed.Columns)),
+		strings.Join(slices.Collect(maps.Keys(primaryKeys)), ","),
+		updateAssignments(departed.Columns, primaryKeys),
+	)
+	for _, row := range departed.Rows {
+		cmd, err := tx.Exec(*db.Ctx, departedInsert, row...)
+		if err != nil {
+			tx.Rollback(*db.Ctx)
+			return fmt.Errorf("db insert failed: %v, cmd: %s, query: %s", err, cmd.String(), departedInsert)
+		}
+	}
+
+	return tx.Commit(*db.Ctx)
+}
+
+/*
+Updates the 'graduated_status' column in the public.enrollment table based on the values of
+'graduated', 'grad_year', and 'depart_date' for each student.
+
+Logic:
+  - If `graduated = FALSE`:
+  - If `grad_year IS NULL`: status = 'Departed {MM-DD-YYYY}' using depart_date.
+  - Else: status = 'Class of {grad_year}'.
+  - If `graduated = TRUE`: status = 'Graduated {MM-DD-YYYY}' using depart_date.
+  - If depart_date is NULL where it's required in the string, the status will be NULL.
+*/
+func concatGradStatus(ctx *context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(*ctx, `
+    UPDATE public.enrollment
+    SET graduated_status = CASE
+        WHEN NOT graduated AND grad_year IS NULL AND depart_date IS NOT NULL
+            THEN 'Departed ' || TO_CHAR(depart_date, 'MM-DD-YYYY')
+        WHEN NOT graduated AND grad_year IS NOT NULL
+            THEN 'Class of ' || grad_year::text
+        WHEN graduated AND depart_date IS NOT NULL
+            THEN 'Graduated ' || TO_CHAR(depart_date, 'MM-DD-YYYY')
+        ELSE NULL
+    END;`)
+	return err
+}
+
 func (db *State) TranscriptCommentOps(t blackbaud.UnorderedTable) error {
 	tx, err := db.Conn.BeginTx(*db.Ctx, pgx.TxOptions{})
 	if err != nil {
