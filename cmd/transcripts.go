@@ -3,6 +3,7 @@ package cmd
 import (
 	"log/slog"
 	"os"
+	"sync"
 
 	"github.com/BushSchoolIT/extractor/blackbaud"
 	"github.com/BushSchoolIT/extractor/database"
@@ -29,43 +30,75 @@ func Transcripts(cmd *cobra.Command, args []string) {
 	defer db.Close()
 	// actual logic
 
-	t := blackbaud.UnorderedTable{}
+	var (
+		t     blackbaud.UnorderedTable
+		tLock sync.Mutex
+		wg    sync.WaitGroup
+	)
 	for _, id := range config.TranscriptListIDs {
-		slog.Info("Processing List", slog.String("id", id))
-		for page := 1; ; page++ {
-			parsed, err := api.GetAdvancedList(id, page)
-			if err != nil {
-				slog.Error("Unable to get advanced list", slog.String("id", id), slog.Int("page", page))
-				continue
-			}
-			if len(parsed.Results.Rows) == 0 {
-				break // No more data
-			}
-			if len(t.Columns) == 0 {
-				t.Columns = getColumns(parsed.Results.Rows[0])
-			}
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			slog.Info("Processing List", slog.String("id", id))
+			localTable := processTranscriptList(api, id)
 
-			slog.Info("Collecting Data From Page", slog.Int("page", page))
-			for _, row := range parsed.Results.Rows {
-				newRow := []any{}
-				for _, col := range row.Columns {
-					if col.Name == "grade_id" && col.Value == nil {
-						col.Value = 999999
-					}
-					newRow = append(newRow, col.Value)
-				}
-				t.Rows = append(t.Rows, newRow)
+			tLock.Lock()
+			defer tLock.Unlock()
+
+			// Set columns only once
+			if len(t.Columns) == 0 && len(localTable.Columns) > 0 {
+				t.Columns = localTable.Columns
 			}
-		}
+			t.Rows = append(t.Rows, localTable.Rows...)
+			slog.Info("Processed List", slog.String("id", id))
+		}(id)
 	}
-	slog.Info("Import Complete")
+	wg.Wait()
 
+	slog.Info("Import Complete")
 	slog.Info("Starting Database transformations")
 	err = db.TranscriptOps(t, api.StartYear, api.EndYear)
 	if err != nil {
 		slog.Error("Unable to complete transcript operations", slog.Any("error", err))
 		os.Exit(1)
 	}
+	slog.Info("Doing GPA calculations")
+	err = db.GpaCalculation()
+	if err != nil {
+		slog.Error("Unable to complete transcript operations", slog.Any("error", err))
+		os.Exit(1)
+	}
+	slog.Info("GPA calculations Complete")
+}
+
+func processTranscriptList(api *blackbaud.BBAPIConnector, id string) blackbaud.UnorderedTable {
+	t := blackbaud.UnorderedTable{}
+	for page := 1; ; page++ {
+		parsed, err := api.GetAdvancedList(id, page)
+		if err != nil {
+			slog.Error("Unable to get advanced list", slog.String("id", id), slog.Int("page", page))
+			continue
+		}
+		if len(parsed.Results.Rows) == 0 {
+			break // No more data
+		}
+		if len(t.Columns) == 0 {
+			t.Columns = getColumns(parsed.Results.Rows[0])
+		}
+
+		slog.Info("Collecting Data From Page", slog.Int("page", page), slog.String("id", id))
+		for _, row := range parsed.Results.Rows {
+			newRow := []any{}
+			for _, col := range row.Columns {
+				if col.Name == "grade_id" && col.Value == nil {
+					col.Value = 999999
+				}
+				newRow = append(newRow, col.Value)
+			}
+			t.Rows = append(t.Rows, newRow)
+		}
+	}
+	return t
 }
 
 func getColumns(row blackbaud.Row) []string {

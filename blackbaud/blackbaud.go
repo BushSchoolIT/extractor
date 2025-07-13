@@ -1,8 +1,10 @@
 package blackbaud
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/time/rate"
 	"io"
 	"net/http"
 	"net/url"
@@ -30,6 +32,8 @@ type Config struct {
 type BBAPIConnector struct {
 	config     *Config
 	configPath string
+	ctx        context.Context
+	limiter    *rate.Limiter
 	Client     *http.Client
 	EndYear    int
 	StartYear  int
@@ -57,6 +61,10 @@ type AdvancedList struct {
 	} `json:"paging"`
 }
 
+type Attendance struct {
+	Value []map[string]any `json:"value"`
+}
+
 type Parent struct {
 	FirstName string
 	LastName  string
@@ -64,10 +72,11 @@ type Parent struct {
 }
 
 const (
-	TOKEN_URL string = "https://oauth2.sky.blackbaud.com/token"
-	LISTS_API string = "https://api.sky.blackbaud.com/school/v1/lists/advanced"
-	HOST      string = "api.sky.blackbaud.com"
-	YEAR_API  string = "https://api.sky.blackbaud.com/school/v1/years"
+	TOKEN_URL      string = "https://oauth2.sky.blackbaud.com/token"
+	LISTS_API      string = "https://api.sky.blackbaud.com/school/v1/lists/advanced"
+	HOST           string = "api.sky.blackbaud.com"
+	YEAR_API       string = "https://api.sky.blackbaud.com/school/v1/years"
+	ATTENDANCE_API string = "https://api.sky.blackbaud.com/school/v1/attendance"
 )
 
 // Create a new API connector using an existing JSON path (MUST exist, currently we don't generate the auth stuff just yet)
@@ -82,6 +91,8 @@ func NewBBApiConnector(configPath string) (*BBAPIConnector, error) {
 	connector := &BBAPIConnector{
 		&config,
 		configPath,
+		context.Background(),
+		rate.NewLimiter(rate.Every(250*time.Millisecond), 1),
 		client,
 		0,
 		0,
@@ -188,6 +199,10 @@ func (b *BBAPIConnector) GetAdvancedList(id string, page int) (AdvancedList, err
 }
 
 func (b *BBAPIConnector) NewRequest(method string, url string, body io.Reader) (*http.Request, error) {
+	err := b.limiter.Wait(b.ctx)
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequest(method, url, body)
 
 	if err != nil {
