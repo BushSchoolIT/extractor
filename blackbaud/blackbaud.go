@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"golang.org/x/time/rate"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 type Config struct {
@@ -307,4 +309,39 @@ func AdvancedListApi(id string, page int) string {
 type UnorderedTable struct {
 	Columns []string
 	Rows    [][]any
+}
+
+func ProcessList(api *BBAPIConnector, id string) UnorderedTable {
+	t := UnorderedTable{}
+	for page := 1; ; page++ {
+		parsed, err := api.GetAdvancedList(id, page)
+		if err != nil {
+			slog.Error("Unable to get advanced list", slog.String("id", id), slog.Int("page", page))
+			continue
+		}
+		if len(parsed.Results.Rows) == 0 {
+			break // No more data
+		}
+		if len(t.Columns) == 0 {
+			t.Columns = GetColumns(parsed.Results.Rows[0])
+		}
+
+		slog.Info("Collecting Data From Page", slog.Int("page", page), slog.String("id", id))
+		for _, row := range parsed.Results.Rows {
+			newRow := []any{}
+			for _, col := range row.Columns {
+				newRow = append(newRow, col.Value)
+			}
+			t.Rows = append(t.Rows, newRow)
+		}
+	}
+	return t
+}
+
+func GetColumns(row Row) []string {
+	columns := []string{}
+	for _, col := range row.Columns {
+		columns = append(columns, col.Name)
+	}
+	return columns
 }

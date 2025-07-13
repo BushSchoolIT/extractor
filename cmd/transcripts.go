@@ -83,7 +83,7 @@ func processTranscriptList(api *blackbaud.BBAPIConnector, id string) blackbaud.U
 			break // No more data
 		}
 		if len(t.Columns) == 0 {
-			t.Columns = getColumns(parsed.Results.Rows[0])
+			t.Columns = blackbaud.GetColumns(parsed.Results.Rows[0])
 		}
 
 		slog.Info("Collecting Data From Page", slog.Int("page", page), slog.String("id", id))
@@ -99,12 +99,4 @@ func processTranscriptList(api *blackbaud.BBAPIConnector, id string) blackbaud.U
 		}
 	}
 	return t
-}
-
-func getColumns(row blackbaud.Row) []string {
-	columns := []string{}
-	for _, col := range row.Columns {
-		columns = append(columns, col.Name)
-	}
-	return columns
 }

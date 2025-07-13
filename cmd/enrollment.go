@@ -30,8 +30,8 @@ func Enrollment(cmd *cobra.Command, args []string) {
 	// actual logic
 	slog.Info("Processing enrolled List", slog.String("id", config.EnrollmentListIDs.Enrolled))
 
-	enrolled := processList(api, config.EnrollmentListIDs.Enrolled)
-	departed := processList(api, config.EnrollmentListIDs.Departed)
+	enrolled := blackbaud.ProcessList(api, config.EnrollmentListIDs.Enrolled)
+	departed := blackbaud.ProcessList(api, config.EnrollmentListIDs.Departed)
 	db.EnrollmentOps(enrolled, departed)
 	slog.Info("Import Complete")
 }

@@ -3,13 +3,10 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
-	"os"
-
-	"github.com/BushSchoolIT/extractor/blackbaud"
 	"github.com/BushSchoolIT/extractor/database"
 	"github.com/spf13/cobra"
+	"io"
+	"os"
 )
 
 var (
@@ -99,32 +96,4 @@ func loadConfig(configPath string) (Config, error) {
 		return config, err
 	}
 	return config, nil
-}
-
-// generic list process function
-func processList(api *blackbaud.BBAPIConnector, id string) blackbaud.UnorderedTable {
-	t := blackbaud.UnorderedTable{}
-	for page := 1; ; page++ {
-		parsed, err := api.GetAdvancedList(id, page)
-		if err != nil {
-			slog.Error("Unable to get advanced list", slog.String("id", id), slog.Int("page", page))
-			continue
-		}
-		if len(parsed.Results.Rows) == 0 {
-			break // No more data
-		}
-		if len(t.Columns) == 0 {
-			t.Columns = getColumns(parsed.Results.Rows[0])
-		}
-
-		slog.Info("Collecting Data From Page", slog.Int("page", page), slog.String("id", id))
-		for _, row := range parsed.Results.Rows {
-			newRow := []any{}
-			for _, col := range row.Columns {
-				newRow = append(newRow, col.Value)
-			}
-			t.Rows = append(t.Rows, newRow)
-		}
-	}
-	return t
 }

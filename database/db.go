@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"maps"
 	"math"
 	"slices"
@@ -78,14 +77,10 @@ func (db *State) InsertEmails(t blackbaud.UnorderedTable) error {
 		strings.Join(slices.Collect(maps.Keys(primaryKeys)), ","),
 		updateAssignments(t.Columns, primaryKeys),
 	)
-	slog.Info("Query", slog.String("query", query))
-	for _, row := range t.Rows {
-		slog.Info("Found row", slog.Any("row", row))
-		cmd, err := tx.Exec(*db.Ctx, query, row...)
-		if err != nil {
-			tx.Rollback(*db.Ctx)
-			return fmt.Errorf("failed to insert email row: %v, cmd: %s", err, cmd.String())
-		}
+	err = insertRows(db.Ctx, tx, t.Rows, query)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
 	}
 	return tx.Commit(*db.Ctx)
 }
@@ -109,14 +104,10 @@ func (db *State) InsertAttendance(t blackbaud.UnorderedTable) error {
 		placeHolders(len(t.Columns)),
 		strings.Join(slices.Collect(maps.Keys(primaryKeys)), ","),
 	)
-	slog.Info("Query", slog.String("query", query))
-	for _, row := range t.Rows {
-		slog.Info("Found row", slog.Any("row", row))
-		cmd, err := tx.Exec(*db.Ctx, query, row...)
-		if err != nil {
-			tx.Rollback(*db.Ctx)
-			return fmt.Errorf("failed to insert attendance row: %v, cmd: %s", err, cmd.String())
-		}
+	err = insertRows(db.Ctx, tx, t.Rows, query)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
 	}
 	return tx.Commit(*db.Ctx)
 }
@@ -187,12 +178,10 @@ func (db *State) TranscriptOps(t blackbaud.UnorderedTable, startYear int, endYea
 		updateAssignments(t.Columns, primaryKeys),
 	)
 
-	for _, row := range t.Rows {
-		cmd, err := tx.Exec(*db.Ctx, query, row...)
-		if err != nil {
-			tx.Rollback(*db.Ctx)
-			return fmt.Errorf("db insert failed: %v, cmd: %s, query: %s", err, cmd.String(), query)
-		}
+	err = insertRows(db.Ctx, tx, t.Rows, query)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
 	}
 	cmd, err = fixNoYearlong(db.Ctx, tx)
 	if err != nil {
@@ -236,12 +225,10 @@ func (db *State) EnrollmentOps(enrolled blackbaud.UnorderedTable, departed black
 		strings.Join(slices.Collect(maps.Keys(primaryKeys)), ","),
 		updateAssignments(enrolled.Columns, primaryKeys),
 	)
-	for _, row := range enrolled.Rows {
-		cmd, err := tx.Exec(*db.Ctx, enrolledInsert, row...)
-		if err != nil {
-			tx.Rollback(*db.Ctx)
-			return fmt.Errorf("db insert failed: %v, cmd: %s, query: %s", err, cmd.String(), enrolledInsert)
-		}
+	err = insertRows(db.Ctx, tx, enrolled.Rows, enrolledInsert)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
 	}
 	departedInsert := fmt.Sprintf(`
 	INSERT INTO enrollment (%s) VALUES (%s)
@@ -252,15 +239,28 @@ func (db *State) EnrollmentOps(enrolled blackbaud.UnorderedTable, departed black
 		strings.Join(slices.Collect(maps.Keys(primaryKeys)), ","),
 		updateAssignments(departed.Columns, primaryKeys),
 	)
-	for _, row := range departed.Rows {
-		cmd, err := tx.Exec(*db.Ctx, departedInsert, row...)
-		if err != nil {
-			tx.Rollback(*db.Ctx)
-			return fmt.Errorf("db insert failed: %v, cmd: %s, query: %s", err, cmd.String(), departedInsert)
-		}
+	err = insertRows(db.Ctx, tx, departed.Rows, departedInsert)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
+	}
+	err = concatGradStatus(db.Ctx, tx)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
 	}
 
 	return tx.Commit(*db.Ctx)
+}
+
+func insertRows(ctx *context.Context, tx pgx.Tx, rows [][]any, insert string) error {
+	for _, row := range rows {
+		cmd, err := tx.Exec(*ctx, insert, row...)
+		if err != nil {
+			return fmt.Errorf("db insert failed: %v, cmd: %s, query: %s", err, cmd.String(), insert)
+		}
+	}
+	return nil
 }
 
 /*
@@ -311,12 +311,10 @@ func (db *State) TranscriptCommentOps(t blackbaud.UnorderedTable) error {
 		updateAssignments(t.Columns, primaryKeys),
 	)
 
-	for _, row := range t.Rows {
-		cmd, err := tx.Exec(*db.Ctx, query, row...)
-		if err != nil {
-			tx.Rollback(*db.Ctx)
-			return fmt.Errorf("db insert failed: %v, cmd: %s, query: %s", err, cmd.String(), query)
-		}
+	err = insertRows(db.Ctx, tx, t.Rows, query)
+	if err != nil {
+		tx.Rollback(*db.Ctx)
+		return err
 	}
 	return tx.Commit(*db.Ctx)
 }
