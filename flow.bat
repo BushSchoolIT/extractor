@@ -16,7 +16,7 @@ echo ==================================================== >> "%LOGFILE%"
 echo Starting Prefect Flow at %DATE% %TIME% >> "%LOGFILE%"
 echo ==================================================== >> "%LOGFILE%"
 
-cd /d "C:\Users\Install\BlackbaudExtractor\etl"
+cd /d "C:\Users\Install\bbextract"
 
 python flow.py >> "%LOGFILE%" 2>&1
 
