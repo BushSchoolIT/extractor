@@ -106,7 +106,7 @@ def run_transcripts():
   
 if __name__ == "__main__":
     serve(
-        run_attendance.to_deployment(name="run_attendance", interval=86400),
-        run_transcripts.to_deployment(name="run_transcripts", interval=86400),
-        run_mailsync.to_deployment(name="run_mailsync", interval=86400),
+        run_attendance.to_deployment(name="run_attendance_go", interval=86400),
+        run_transcripts.to_deployment(name="run_transcripts_go", interval=86400),
+        run_mailsync.to_deployment(name="run_mailsync_go", interval=86400),
     )

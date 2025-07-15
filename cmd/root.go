@@ -16,12 +16,12 @@ var (
 	}
 	transcriptCmd = &cobra.Command{
 		Use:   "transcripts",
-		Short: "Extracts transcript info from blackbaud and imports it into the database, does GPA calculations",
+		Short: "Extracts transcript info from blackbaud and imports it into the database",
 		Run:   Transcripts,
 	}
 	gpaCmd = &cobra.Command{
 		Use:   "gpa",
-		Short: "Runs GPA ETL independently (this runs automatically when running transcripts but is helpful for testing/quick refreshes)",
+		Short: "Runs GPA ETL independently",
 		Run:   Gpa,
 	}
 	commentsCmd = &cobra.Command{

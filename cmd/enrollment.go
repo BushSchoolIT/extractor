@@ -32,6 +32,9 @@ func Enrollment(cmd *cobra.Command, args []string) {
 
 	enrolled := blackbaud.ProcessList(api, config.EnrollmentListIDs.Enrolled)
 	departed := blackbaud.ProcessList(api, config.EnrollmentListIDs.Departed)
-	db.EnrollmentOps(enrolled, departed)
+	err = db.EnrollmentOps(enrolled, departed)
+	if err != nil {
+		slog.Error("Unable to complete enrollment database operations", slog.Any("error", err))
+	}
 	slog.Info("Import Complete")
 }
