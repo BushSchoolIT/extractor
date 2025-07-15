@@ -73,7 +73,7 @@ def mailsync_task():
 
 
 @flow(task_runner=SequentialTaskRunner())
-def run_mailsync():
+def run_mailsync_go():
     logger = get_run_logger()
     parents_result = parents_task()
     if not parents_result.get("success"):
@@ -84,11 +84,11 @@ def run_mailsync():
         logger.error("Mail sync task failed.")
 
 @flow
-def run_attendance():
+def run_attendance_go():
     runExe([EXTRACTOR_PATH, "attendance"])
 
 @flow(task_runner=SequentialTaskRunner())
-def run_transcripts():
+def run_transcripts_go():
     logger = get_run_logger()
     transcripts_result = transcripts_task()
     if not transcripts_result.get("success"):
@@ -103,10 +103,9 @@ def run_transcripts():
         logger.error("Stopping flow due to parent task failure.")
         return
 
-  
 if __name__ == "__main__":
     serve(
-        run_attendance.to_deployment(name="run_attendance_go", interval=86400),
-        run_transcripts.to_deployment(name="run_transcripts_go", interval=86400),
-        run_mailsync.to_deployment(name="run_mailsync_go", interval=86400),
+        run_attendance_go.to_deployment(name="run_attendance_go", interval=86400),
+        run_transcripts_go.to_deployment(name="run_transcripts_go", interval=86400),
+        run_mailsync_go.to_deployment(name="run_mailsync_go", interval=86400),
     )
