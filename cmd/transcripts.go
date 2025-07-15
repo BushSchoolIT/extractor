@@ -56,19 +56,14 @@ func Transcripts(cmd *cobra.Command, args []string) {
 	wg.Wait()
 
 	slog.Info("Import Complete")
-	slog.Info("Starting Database transformations")
+	slog.Info("Starting Transcripts Database transformations")
 	err = db.TranscriptOps(t, api.StartYear, api.EndYear)
 	if err != nil {
 		slog.Error("Unable to complete transcript operations", slog.Any("error", err))
 		os.Exit(1)
 	}
-	slog.Info("Doing GPA calculations")
-	err = db.GpaCalculation()
-	if err != nil {
-		slog.Error("Unable to complete transcript operations", slog.Any("error", err))
-		os.Exit(1)
-	}
-	slog.Info("GPA calculations Complete")
+	slog.Info("Finished Transcripts Database transformations")
+	slog.Info("Finished All Database transformations")
 }
 
 func processTranscriptList(api *blackbaud.BBAPIConnector, id string) blackbaud.UnorderedTable {

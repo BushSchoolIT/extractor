@@ -28,7 +28,6 @@ func Comments(cmd *cobra.Command, args []string) {
 	}
 	defer db.Close()
 	// actual logic
-
 	t := blackbaud.ProcessList(api, config.TranscriptCommentsID)
 	slog.Info("Import Complete")
 
