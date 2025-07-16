@@ -30,6 +30,7 @@ def runExe(args: list[str]):
     name = os.path.basename(exe_path)
     logger = get_run_logger()
 
+    logger.info(f"Running cmd: {[exe_path] + args[1:]}")
     result = subprocess.run(
         [exe_path] + args[1:],
         cwd=exe_dir,
@@ -45,10 +46,9 @@ def runExe(args: list[str]):
         logger.error(f"{name} failed with exit code {result.returncode}")
         logger.error("Error output:\n%s", error_output)
         raise Exception(f"{name} failed with code {result.returncode}")
-    else:
-        logger.info(f"{name} completed successfully.")
-        if output:
-            logger.info("Output:\n%s", output)
+
+    logger.info(f"{name} completed successfully.")
+    logger.info("Output:\n%s", output)
 
 @task
 def transcripts_task():
