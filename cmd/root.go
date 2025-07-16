@@ -22,27 +22,27 @@ var (
 	gpaCmd = &cobra.Command{
 		Use:   "gpa",
 		Short: "Runs GPA ETL independently",
-		Run:   Gpa,
+		RunE:  Gpa,
 	}
 	commentsCmd = &cobra.Command{
 		Use:   "comments",
 		Short: "Extracts transcript comments from blackbaud and imports it into the database",
-		Run:   Comments,
+		RunE:  Comments,
 	}
 	parentsCmd = &cobra.Command{
 		Use:   "parents",
 		Short: "Extracts parent info from blackbaud and imports it into the database for mailing info",
-		Run:   Parents,
+		RunE:  Parents,
 	}
 	attendanceCmd = &cobra.Command{
 		Use:   "attendance",
 		Short: "Extracts attendance info from blackbaud and imports it into the database",
-		Run:   Attendance,
+		RunE:  Attendance,
 	}
 	enrollmentCmd = &cobra.Command{
 		Use:   "enrollment",
 		Short: "Extracts enrollment info from blackbaud and imports into the database",
-		Run:   Enrollment,
+		RunE:  Enrollment,
 	}
 	fLogFile    string
 	fLogLevel   string

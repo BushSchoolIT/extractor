@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"log/slog"
-	"os"
 	"strconv"
 	"strings"
 
@@ -13,22 +12,22 @@ import (
 
 const YEAR_PREFIX string = "Grad Year"
 
-func Parents(cmd *cobra.Command, args []string) {
+func Parents(cmd *cobra.Command, args []string) error {
 	// load config and blackbaud API
 	api, err := blackbaud.NewBBApiConnector(fAuthFile)
 	if err != nil {
 		slog.Error("Unable to access blackbaud api", slog.Any("error", err))
-		os.Exit(1)
+		return err
 	}
 	config, err := loadConfig(fConfigFile)
 	if err != nil {
 		slog.Error("Unable to load config", slog.Any("error", err))
-		os.Exit(1)
+		return err
 	}
 	db, err := database.Connect(config.Postgres)
 	if err != nil {
 		slog.Error("Unable to connect to DB", slog.Any("error", err))
-		os.Exit(1)
+		return err
 	}
 	defer db.Close()
 
@@ -37,7 +36,7 @@ func Parents(cmd *cobra.Command, args []string) {
 		parsed, err := api.GetAdvancedList(config.ParentsID, page)
 		if err != nil {
 			slog.Error("Unable to get advanced list", slog.String("id", config.ParentsID), slog.Int("page", page))
-			continue
+			return err
 		}
 		if len(parsed.Results.Rows) == 0 {
 			break // No more data
@@ -72,8 +71,9 @@ func Parents(cmd *cobra.Command, args []string) {
 	err = db.InsertEmails(t)
 	if err != nil {
 		slog.Error("Unable to insert emails", slog.Any("error", err))
-		os.Exit(1)
+		return err
 	}
+	return nil
 }
 
 func gradYearToGrade(graduationYear int, currentYear int) int {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"sync"
@@ -34,17 +35,21 @@ func Transcripts(cmd *cobra.Command, args []string) {
 		t     blackbaud.UnorderedTable
 		tLock sync.Mutex
 		wg    sync.WaitGroup
+		errCh = make(chan error, len(config.TranscriptListIDs))
 	)
 	for _, id := range config.TranscriptListIDs {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
 			slog.Info("Processing List", slog.String("id", id))
-			localTable := processTranscriptList(api, id)
+			localTable, err := processTranscriptList(api, id)
+
+			if err != nil {
+				errCh <- fmt.Errorf("id: %s, error: %v", id, err)
+			}
 
 			tLock.Lock()
 			defer tLock.Unlock()
-
 			// Set columns only once
 			if len(t.Columns) == 0 && len(localTable.Columns) > 0 {
 				t.Columns = localTable.Columns
@@ -54,6 +59,11 @@ func Transcripts(cmd *cobra.Command, args []string) {
 		}(id)
 	}
 	wg.Wait()
+	close(errCh)
+	for e := range errCh {
+		slog.Error("Unable to fetch transcript info", slog.Any("error", e))
+		os.Exit(1)
+	}
 
 	slog.Info("Import Complete")
 	slog.Info("Starting Transcripts Database transformations")
@@ -66,13 +76,13 @@ func Transcripts(cmd *cobra.Command, args []string) {
 	slog.Info("Finished All Database transformations")
 }
 
-func processTranscriptList(api *blackbaud.BBAPIConnector, id string) blackbaud.UnorderedTable {
+func processTranscriptList(api *blackbaud.BBAPIConnector, id string) (blackbaud.UnorderedTable, error) {
 	t := blackbaud.UnorderedTable{}
 	for page := 1; ; page++ {
 		parsed, err := api.GetAdvancedList(id, page)
 		if err != nil {
 			slog.Error("Unable to get advanced list", slog.String("id", id), slog.Int("page", page))
-			continue
+			return t, fmt.Errorf("Unable to get advanced list, id: %s, err: %v", id, err)
 		}
 		if len(parsed.Results.Rows) == 0 {
 			break // No more data
@@ -93,5 +103,5 @@ func processTranscriptList(api *blackbaud.BBAPIConnector, id string) blackbaud.U
 			t.Rows = append(t.Rows, newRow)
 		}
 	}
-	return t
+	return t, nil
 }

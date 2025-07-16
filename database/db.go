@@ -479,7 +479,6 @@ func transcriptCleanup(ctx *context.Context, tx pgx.Tx, startYear int, endYear i
 	for i := range 5 {
 		yearList = append(yearList, endYear-i)
 	}
-	fmt.Printf("list: %v", yearList)
 	transcript_query := `
                 DELETE FROM public.transcripts
                                      WHERE (grade_id = 888888

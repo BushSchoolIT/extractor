@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"os"
 	"slices"
 	"time"
 
@@ -15,22 +14,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func Attendance(cmd *cobra.Command, args []string) {
+func Attendance(cmd *cobra.Command, args []string) error {
 	// load config and blackbaud API
 	api, err := blackbaud.NewBBApiConnector(fAuthFile)
 	if err != nil {
 		slog.Error("Unable to access blackbaud api", slog.Any("error", err))
-		os.Exit(1)
+		return err
 	}
 	config, err := loadConfig(fConfigFile)
 	if err != nil {
 		slog.Error("Unable to load config", slog.Any("error", err))
-		os.Exit(1)
+		return err
 	}
 	db, err := database.Connect(config.Postgres)
 	if err != nil {
 		slog.Error("Unable to connect to DB", slog.Any("error", err))
-		os.Exit(1)
+		return err
 	}
 	defer db.Close()
 
@@ -45,22 +44,22 @@ func Attendance(cmd *cobra.Command, args []string) {
 		resp, err := api.Client.Do(req)
 		if err != nil {
 			slog.Error("Unable to get attendance data", slog.String("id", id))
-			continue
+			return err
 		}
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			slog.Error("Unable to get read response body", slog.String("id", id))
-			continue
+			return err
 		}
 		if resp.StatusCode != http.StatusOK {
 			slog.Error("Response returned unexpected status code", slog.String("id", id), slog.Int("code", resp.StatusCode), slog.String("body", string(body)))
-			continue
+			return err
 		}
 		parsed := blackbaud.Attendance{}
 		err = json.Unmarshal(body, &parsed)
 		if err != nil {
 			slog.Error("Unable to unmarshal attendance data", slog.String("id", id))
-			continue
+			return err
 		}
 		for _, row := range parsed.Value {
 			if len(t.Columns) == 0 {
@@ -77,6 +76,7 @@ func Attendance(cmd *cobra.Command, args []string) {
 	err = db.InsertAttendance(t)
 	if err != nil {
 		slog.Error("Unable to insert emails", slog.Any("error", err))
-		os.Exit(1)
+		return err
 	}
+	return nil
 }

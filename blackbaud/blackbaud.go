@@ -311,13 +311,13 @@ type UnorderedTable struct {
 	Rows    [][]any
 }
 
-func ProcessList(api *BBAPIConnector, id string) UnorderedTable {
+func ProcessList(api *BBAPIConnector, id string) (UnorderedTable, error) {
 	t := UnorderedTable{}
 	for page := 1; ; page++ {
 		parsed, err := api.GetAdvancedList(id, page)
 		if err != nil {
 			slog.Error("Unable to get advanced list", slog.String("id", id), slog.Int("page", page))
-			continue
+			return t, fmt.Errorf("Unable to get advanced list, id: %s, err: %v", id, err)
 		}
 		if len(parsed.Results.Rows) == 0 {
 			break // No more data
@@ -335,7 +335,7 @@ func ProcessList(api *BBAPIConnector, id string) UnorderedTable {
 			t.Rows = append(t.Rows, newRow)
 		}
 	}
-	return t
+	return t, nil
 }
 
 func GetColumns(row Row) []string {
