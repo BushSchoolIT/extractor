@@ -4,6 +4,11 @@ import io
 import subprocess
 import pathlib
 from multiprocessing import Process
+
+# SETUP environment BEFORE importing prefect (important)
+os.environ["PREFECT_API_URL"] = "http://localhost:4200/api"
+WORK_POOL = "work_pool_0"
+
 from prefect import flow, task, get_run_logger
 from prefect.task_runners import SequentialTaskRunner
 from prefect.deployments import Deployment
@@ -13,10 +18,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
 EXTRACTOR_PATH = os.getenv("EXTRACTOR_PATH", str(BASE_DIR / "bbextract"))
 MAILSYNC_PATH = os.getenv("MAILSYNC_PATH", str(BASE_DIR / "mailsync"))
-WORK_POOL = "work_pool_0"
 
-# Setup prefect API URL
-os.environ["PREFECT_API_URL"] = "http://localhost:4200/api"
 
 
 def start_worker():
