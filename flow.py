@@ -3,6 +3,7 @@ import sys
 import io
 import subprocess
 import pathlib
+from multiprocessing import Process
 from prefect import flow, task, get_run_logger
 from prefect.task_runners import SequentialTaskRunner
 from prefect.deployments import Deployment
@@ -16,6 +17,10 @@ WORK_POOL = "work_pool_0"
 
 # Setup prefect API URL
 os.environ["PREFECT_API_URL"] = "http://localhost:4200/api"
+
+
+def start_worker():
+    subprocess.run(["prefect", "worker", "start","--pool", WORK_POOL])
 
 def runExe(args: list[str]):
     exe_path = args[0]
@@ -104,3 +109,7 @@ if __name__ == "__main__":
         work_pool_name=WORK_POOL,
         schedule={"interval": 86400}
     ).apply()
+
+    p = Process(target=start_worker)
+    p.start()
+    p.join()
