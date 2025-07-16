@@ -24,7 +24,7 @@ MAILSYNC_PATH = os.getenv("MAILSYNC_PATH", str(BASE_DIR / "mailsync"))
 def start_worker():
     subprocess.run(["prefect", "worker", "start","--pool", WORK_POOL])
 
-def runExe(args: list[str]):
+def run_exe(args: list[str]):
     exe_path = args[0]
     exe_dir = os.path.dirname(exe_path)
     name = os.path.basename(exe_path)
@@ -36,59 +36,60 @@ def runExe(args: list[str]):
         cwd=exe_dir,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        creationflags=subprocess.CREATE_NO_WINDOW
-    )
-
-    output = result.stdout.decode("utf-8", errors="replace").strip()
-    error_output = result.stderr.decode("utf-8", errors="replace").strip()
+        text=True,
+       )
 
     if result.returncode != 0:
         logger.error(f"{name} failed with exit code {result.returncode}")
-        logger.error("Error output:\n%s", error_output)
+        logger.error("Error output:\n%s", result.stderr.strip)
         raise Exception(f"{name} failed with code {result.returncode}")
 
     logger.info(f"{name} completed successfully.")
-    logger.info("Output:\n%s", output)
+    if result.stdout:
+        logger.info(f"{name} stdout:\n{result.stdout.strip()}")
+
+    if result.stderr:
+        logger.warning(f"{name} stderr:\n{result.stderr.strip()}")
 
 @task
-def transcripts_task():
-    runExe([EXTRACTOR_PATH, "transcripts"])
+def transcripts_task_go():
+    run_exe([EXTRACTOR_PATH, "transcripts"])
 
 @task
-def gpa_task():
-    runExe([EXTRACTOR_PATH, "gpa"])
+def gpa_task_go():
+    run_exe([EXTRACTOR_PATH, "gpa"])
 
 @task
-def enrollment_task():
-    runExe([EXTRACTOR_PATH, "enrollment"])
+def enrollment_task_go():
+    run_exe([EXTRACTOR_PATH, "enrollment"])
 
 @task 
-def comments_task():
-    runExe([EXTRACTOR_PATH, "comments"])
+def comments_task_go():
+    run_exe([EXTRACTOR_PATH, "comments"])
 
 @task
-def parents_task():
-    runExe([EXTRACTOR_PATH, "parents"])
+def parents_task_go():
+    run_exe([EXTRACTOR_PATH, "parents"])
 
 @task
-def mailsync_task():
-    runExe([MAILSYNC_PATH])
+def mailsync_task_go():
+    run_exe([MAILSYNC_PATH])
 
 
 @flow(task_runner=SequentialTaskRunner())
 def run_mailsync_go():
-    parents_task()
-    mailsync_task()
+    parents_task_go()
+    mailsync_task_go()
 
 @flow
 def run_attendance_go():
-    runExe([EXTRACTOR_PATH, "attendance"])
+    run_exe([EXTRACTOR_PATH, "attendance"])
 
 @flow(task_runner=SequentialTaskRunner())
 def run_transcripts_go():
-    transcripts_task()
-    comments_task()
-    gpa_task()
+    transcripts_task_go()
+    comments_task_go()
+    gpa_task_go()
 
 if __name__ == "__main__":
     Deployment.build_from_flow(

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"log/slog"
+	"os"
+
 	"github.com/BushSchoolIT/extractor/cmd"
-	"log"
 )
 
 func main() {
-	log.SetFlags(0)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
 	cmd.Execute()
 }
