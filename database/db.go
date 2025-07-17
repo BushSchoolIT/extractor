@@ -342,53 +342,31 @@ func weightedAverage(records []Transcript) float64 {
 }
 
 func (db *State) GpaCalculation() error {
-	rows, err := db.Conn.Query(*db.Ctx, `
-	SELECT student_user_id, score, grade_description
-	FROM public.transcripts 
-	WHERE grade_description NOT IN ('Fall Term Grades YL', 'Spring Term Grades YL') 
-	  AND grade_id != 999999 
-	  AND grade IN ('A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F', 'WF', 'NC')
-	ORDER BY student_user_id;
-	`)
+	_, err := db.Conn.Exec(*db.Ctx, `
+INSERT INTO public.gpa (student_user_id, calculated_gpa)
+SELECT 
+  student_user_id,
+  ROUND(SUM(score * credits) / NULLIF(SUM(credits), 0), 2) AS calculated_gpa
+FROM (
+  SELECT 
+    student_user_id,
+    score::NUMERIC,
+    CASE 
+      WHEN grade_description = 'Year-Long Grades' THEN 2.0::NUMERIC
+      ELSE 1.0::NUMERIC
+    END AS credits
+  FROM public.transcripts
+  WHERE grade_description NOT IN ('Fall Term Grades YL', 'Spring Term Grades YL')
+    AND grade_id != 999999
+    AND grade IN ('A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-', 'F', 'WF', 'NC')
+) AS weighted
+GROUP BY student_user_id
+ON CONFLICT (student_user_id)
+DO UPDATE SET calculated_gpa = EXCLUDED.calculated_gpa;`)
 	if err != nil {
 		return err
 	}
-	// Group records by student
-	studentMap := map[int][]Transcript{}
-	for rows.Next() {
-		var t Transcript
-		if err := rows.Scan(&t.StudentID, &t.Score, &t.GradeDesc); err != nil {
-			return err
-		}
-		studentMap[t.StudentID] = append(studentMap[t.StudentID], t)
-	}
-
-	tx, err := db.Conn.BeginTx(*db.Ctx, pgx.TxOptions{})
-	if err != nil {
-		return err
-	}
-	_, err = tx.Exec(*db.Ctx, `TRUNCATE TABLE public.gpa`)
-	if err != nil {
-		tx.Rollback(*db.Ctx)
-		return err
-	}
-
-	// Insert/update GPA
-	for id, records := range studentMap {
-		gpa := weightedAverage(records)
-		_, err := tx.Exec(*db.Ctx, `
-			INSERT INTO public.gpa (student_user_id, calculated_gpa)
-			VALUES ($1, $2)
-			ON CONFLICT (student_user_id)
-			DO UPDATE SET calculated_gpa = EXCLUDED.calculated_gpa;
-		`, id, gpa)
-		if err != nil {
-			tx.Rollback(*db.Ctx)
-			return err
-		}
-	}
-
-	return tx.Commit(*db.Ctx)
+	return nil
 }
 
 // transformation used in the transcript ETL, used for taking yearlong courses with only 1 grade and fixing them to have both grades and be graded for both semesters
