@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"math"
 	"slices"
 	"strings"
 
@@ -324,14 +323,14 @@ func (db *State) GpaCalculation() error {
 INSERT INTO public.gpa (student_user_id, calculated_gpa)
 SELECT 
   student_user_id,
-  ROUND(SUM(score * credits) / NULLIF(SUM(credits), 0), 2) AS calculated_gpa
+ROUND((SUM(score::NUMERIC * credits::NUMERIC) / NULLIF(SUM(credits::NUMERIC), 0))::NUMERIC, 2)
 FROM (
-  SELECT 
+  SELECT
     student_user_id,
     score::NUMERIC,
     CASE 
-      WHEN grade_description = 'Year-Long Grades' THEN 2.0::NUMERIC
-      ELSE 1.0::NUMERIC
+      WHEN grade_description = 'Year-Long Grades' THEN 2::NUMERIC
+      ELSE 1::NUMERIC
     END AS credits
   FROM public.transcripts
   WHERE grade_description NOT IN ('Fall Term Grades YL', 'Spring Term Grades YL')
