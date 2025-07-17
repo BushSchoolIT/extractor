@@ -319,28 +319,6 @@ func (db *State) TranscriptCommentOps(t blackbaud.UnorderedTable) error {
 	return tx.Commit(*db.Ctx)
 }
 
-type Transcript struct {
-	StudentID int
-	Score     float64
-	GradeDesc string
-}
-
-func weightedAverage(records []Transcript) float64 {
-	var num, denom float64
-	for _, r := range records {
-		credits := 1.0
-		if r.GradeDesc == "Year-Long Grades" {
-			credits = 2.0
-		}
-		num += r.Score * credits
-		denom += credits
-	}
-	if denom == 0 {
-		return 0
-	}
-	return math.Round((num/denom)*100) / 100
-}
-
 func (db *State) GpaCalculation() error {
 	_, err := db.Conn.Exec(*db.Ctx, `
 INSERT INTO public.gpa (student_user_id, calculated_gpa)
