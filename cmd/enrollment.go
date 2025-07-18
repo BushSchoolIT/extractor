@@ -42,6 +42,7 @@ func Enrollment(cmd *cobra.Command, args []string) error {
 	err = db.EnrollmentOps(enrolled, departed)
 	if err != nil {
 		slog.Error("Unable to complete enrollment database operations", slog.Any("error", err))
+		return err
 	}
 	slog.Info("Import Complete")
 	return nil

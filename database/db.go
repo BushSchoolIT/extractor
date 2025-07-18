@@ -278,14 +278,17 @@ func concatGradStatus(ctx *context.Context, tx pgx.Tx) error {
     UPDATE public.enrollment
     SET graduated_status = CASE
         WHEN NOT graduated AND grad_year IS NULL AND depart_date IS NOT NULL
-            THEN 'Departed ' || TO_CHAR(depart_date, 'MM-DD-YYYY')
+            THEN 'Departed ' || TO_CHAR(depart_date::date, 'MM-DD-YYYY')
         WHEN NOT graduated AND grad_year IS NOT NULL
             THEN 'Class of ' || grad_year::text
         WHEN graduated AND depart_date IS NOT NULL
-            THEN 'Graduated ' || TO_CHAR(depart_date, 'MM-DD-YYYY')
+            THEN 'Graduated ' || TO_CHAR(depart_date::date, 'MM-DD-YYYY')
         ELSE NULL
     END;`)
-	return err
+	if err != nil {
+		return fmt.Errorf("Error concatting grad status: %v", err)
+	}
+	return nil
 }
 
 func (db *State) TranscriptCommentOps(t blackbaud.UnorderedTable) error {

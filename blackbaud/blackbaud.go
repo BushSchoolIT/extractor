@@ -67,6 +67,22 @@ type Attendance struct {
 	Value []map[string]any `json:"value"`
 }
 
+type UserReadCollection struct {
+	Count    int32      `json:"count"`
+	NextLink string     `json:"next_link"`
+	Value    []UserRead `json:"value"`
+}
+
+type UserRead struct {
+	ID            int32  `json:"id"`
+	FirstName     string `json:"first_name"`
+	PreferredName string `json:"preferred_name"`
+	MiddleName    string `json:"middle_name"`
+	LastName      string `json:"last_name"`
+	Email         string `json:"email"`
+	Display       string `json:"display"`
+}
+
 type Parent struct {
 	FirstName string
 	LastName  string
@@ -79,6 +95,7 @@ const (
 	HOST           string = "api.sky.blackbaud.com"
 	YEAR_API       string = "https://api.sky.blackbaud.com/school/v1/years"
 	ATTENDANCE_API string = "https://api.sky.blackbaud.com/school/v1/attendance"
+	USERS_API      string = "https://api.sky.blackbaud.com/school/v1/users"
 )
 
 // Create a new API connector using an existing JSON path (MUST exist, currently we don't generate the auth stuff just yet)

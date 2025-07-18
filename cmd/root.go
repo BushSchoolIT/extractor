@@ -63,6 +63,7 @@ func init() {
 	rootCmd.AddCommand(attendanceCmd)
 	rootCmd.AddCommand(commentsCmd)
 	rootCmd.AddCommand(gpaCmd)
+	rootCmd.AddCommand(enrollmentCmd)
 	rootCmd.PersistentFlags().StringVar(&fConfigFile, "config", "config.json", "config file containing list IDs")
 	rootCmd.PersistentFlags().StringVar(&fAuthFile, "auth", "bb_auth.json", "authconfig for blackbaud")
 }
