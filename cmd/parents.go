@@ -68,7 +68,7 @@ func Parents(cmd *cobra.Command, args []string) error {
 			t.Rows = append(t.Rows, newRow)
 		}
 	}
-	err = db.InsertEmails(t)
+	err = db.InsertParentEmails(t)
 	if err != nil {
 		slog.Error("Unable to insert emails", slog.Any("error", err))
 		return err
